@@ -24,8 +24,40 @@ object Prefs {
     private const val KEY_PUNCTUATION_COMMANDS = "punctuation_commands_enabled"
     private const val KEY_FILLER_REMOVAL = "filler_removal_enabled"
 
+    /**
+     * Crash-guard flags live in their own file, which is excluded from backup and device
+     * transfer (see res/xml backup_rules and data_extraction_rules): a "load pending" flag restored onto a new phone would fire a
+     * false crash notice there.
+     */
+    private const val RUNTIME_FILE = "flowkey_runtime"
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    @Volatile private var runtimeMigrated = false
+
+    /** The runtime prefs file, migrating the v1.1 crash-guard keys out of the settings file once. */
+    private fun runtime(context: Context): SharedPreferences {
+        val rt = context.getSharedPreferences(RUNTIME_FILE, Context.MODE_PRIVATE)
+        if (!runtimeMigrated) {
+            synchronized(this) {
+                if (!runtimeMigrated) {
+                    val old = prefs(context)
+                    val keys = listOf(KEY_STREAMING_LOAD_PENDING, KEY_STREAMING_CRASH_NOTICE)
+                    if (keys.any { old.contains(it) }) {
+                        val e = rt.edit()
+                        for (k in keys) if (old.contains(k)) e.putBoolean(k, old.getBoolean(k, false))
+                        e.commit()
+                        val oe = old.edit()
+                        for (k in keys) oe.remove(k)
+                        oe.commit()
+                    }
+                    runtimeMigrated = true
+                }
+            }
+        }
+        return rt
+    }
 
     // ------------------------------------------------------------- language
 
@@ -65,16 +97,16 @@ object Prefs {
      * next start, the previous load killed the process.
      */
     fun setStreamingLoadPending(context: Context, pending: Boolean) {
-        prefs(context).edit().putBoolean(KEY_STREAMING_LOAD_PENDING, pending).commit()
+        runtime(context).edit().putBoolean(KEY_STREAMING_LOAD_PENDING, pending).commit()
     }
 
     fun isStreamingLoadPending(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_STREAMING_LOAD_PENDING, false)
+        runtime(context).getBoolean(KEY_STREAMING_LOAD_PENDING, false)
 
     /** Turns streaming off after a crashed load and leaves a one-time notice for Setup. */
     fun disableStreamingAfterCrash(context: Context) {
-        prefs(context).edit()
-            .putBoolean(KEY_STREAMING, false)
+        prefs(context).edit().putBoolean(KEY_STREAMING, false).commit()
+        runtime(context).edit()
             .putBoolean(KEY_STREAMING_LOAD_PENDING, false)
             .putBoolean(KEY_STREAMING_CRASH_NOTICE, true)
             .commit()
@@ -82,7 +114,7 @@ object Prefs {
 
     /** Returns true once after [disableStreamingAfterCrash], then clears the notice. */
     fun consumeStreamingCrashNotice(context: Context): Boolean {
-        val p = prefs(context)
+        val p = runtime(context)
         if (!p.getBoolean(KEY_STREAMING_CRASH_NOTICE, false)) return false
         p.edit().putBoolean(KEY_STREAMING_CRASH_NOTICE, false).apply()
         return true

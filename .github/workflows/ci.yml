@@ -37,9 +37,12 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v6
-      - name: Fetch sherpa-onnx AAR
+      - name: Fetch sherpa-onnx AAR and VAD model
         working-directory: android
         run: ./fetch-deps.sh
+      - name: Unit tests (pure Kotlin logic on the JVM)
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --no-daemon
       - name: Build
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon

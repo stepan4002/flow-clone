@@ -40,6 +40,11 @@ android {
     lint {
         abortOnError = false
     }
+
+    testOptions {
+        // Pure-Kotlin logic is unit-tested on the JVM; stub android.* calls (e.g. Log).
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -52,4 +57,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

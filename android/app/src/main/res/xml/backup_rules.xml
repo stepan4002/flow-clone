@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup (Android 6-11). Speech models are large and re-copied from the APK, and the
+     runtime prefs hold crash-guard flags that must not be restored onto another device. -->
+<full-backup-content>
+    <exclude domain="external" path="model/" />
+    <exclude domain="file" path="hotwords/" />
+    <exclude domain="sharedpref" path="flowkey_runtime.xml" />
+</full-backup-content>
