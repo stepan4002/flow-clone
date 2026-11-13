@@ -266,6 +266,14 @@
                     android:layout_height="wrap_content"
                     android:text="@string/setup_punctuation_switch" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:alpha="0.7"
+                    android:text="@string/setup_punctuation_desc"
+                    android:textSize="12sp" />
+
                 <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switchFillers"
                     android:layout_width="match_parent"

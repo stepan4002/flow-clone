@@ -66,7 +66,8 @@ class VoiceInputIME : InputMethodService() {
         val autoStopMs: Long,
         val removeFillers: Boolean,
         val punctuationCommands: Boolean,
-        val english: Boolean,
+        /** Prefs language for this session ("auto" or a code); "en" in streaming mode. */
+        val language: String,
     )
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -96,8 +97,11 @@ class VoiceInputIME : InputMethodService() {
         autoStopMs = 2500L,
         removeFillers = true,
         punctuationCommands = true,
-        english = true,
+        language = "en",
     )
+
+    /** Auto mode: the language Whisper detected first in this session (sticky). */
+    private var sessionLang: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -289,8 +293,9 @@ class VoiceInputIME : InputMethodService() {
             autoStopMs = Prefs.getAutoStopMs(this),
             removeFillers = Prefs.isFillerRemovalEnabled(this),
             punctuationCommands = Prefs.isPunctuationCommandsEnabled(this),
-            english = Prefs.isStreamingMode(this) || Prefs.getLanguage(this) == "en",
+            language = if (Prefs.isStreamingMode(this)) "en" else Prefs.getLanguage(this),
         )
+        sessionLang = null
 
         val record = createAudioRecord()
         if (record == null) {
@@ -416,7 +421,7 @@ class VoiceInputIME : InputMethodService() {
                 transcribing = true
                 setStatus(getString(R.string.status_transcribing))
             }
-            val text = try {
+            val result = try {
                 val all = FloatArray(chunks.sumOf { it.size })
                 var pos = 0
                 for (c in chunks) {
@@ -427,7 +432,7 @@ class VoiceInputIME : InputMethodService() {
                 try {
                     stream.acceptWaveform(all, SAMPLE_RATE)
                     recognizer.decode(stream)
-                    recognizer.getResult(stream).text
+                    recognizer.getResult(stream)
                 } finally {
                     stream.release()
                 }
@@ -443,7 +448,7 @@ class VoiceInputIME : InputMethodService() {
             }
             withContext(NonCancellable + Dispatchers.Main) {
                 transcribing = false
-                if (text.isBlank()) clearPlaceholder() else commitSegment(text)
+                if (result.text.isBlank()) clearPlaceholder() else commitSegment(result.text, result.lang)
                 refreshIdleStatus()
             }
         }
@@ -464,7 +469,8 @@ class VoiceInputIME : InputMethodService() {
                     val samples = FloatArray(n) { buffer[it] / 32768.0f }
                     stream.acceptWaveform(samples, SAMPLE_RATE)
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
-                    val text = recognizer.getResult(stream).text
+                    // The Zipformer emits UPPER CASE without punctuation; cleanup re-capitalizes.
+                    val text = recognizer.getResult(stream).text.lowercase()
                     if (recognizer.isEndpoint(stream)) {
                         recognizer.reset(stream)
                         withContext(Dispatchers.Main) {
@@ -479,7 +485,7 @@ class VoiceInputIME : InputMethodService() {
                     // Flush buffered audio so trailing words are not lost.
                     stream.inputFinished()
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
-                    val text = recognizer.getResult(stream).text
+                    val text = recognizer.getResult(stream).text.lowercase()
                     withContext(NonCancellable + Dispatchers.Main) {
                         if (text.isNotBlank()) commitSegment(text) else clearPlaceholder()
                     }
@@ -526,7 +532,17 @@ class VoiceInputIME : InputMethodService() {
         setStatus(partial)
     }
 
-    private fun commitSegment(raw: String) {
+    /**
+     * Language whose spoken commands apply. In auto mode it is the first language Whisper
+     * detects in the session, kept for the rest of it (short phrases are often misdetected).
+     */
+    private fun commandLanguage(detectedLang: String?): String? {
+        if (options.language != Languages.AUTO) return options.language
+        if (sessionLang == null) sessionLang = Languages.normalizeDetected(detectedLang)
+        return sessionLang
+    }
+
+    private fun commitSegment(raw: String, detectedLang: String? = null) {
         val ic = currentInputConnection ?: return
         val cleaned = TextCleanup.process(
             raw,
@@ -535,7 +551,7 @@ class VoiceInputIME : InputMethodService() {
             snippets,
             removeFillers = options.removeFillers,
             punctuationCommands = options.punctuationCommands,
-            capitalizeEnglishI = options.english,
+            commandLanguage = commandLanguage(detectedLang),
         )
         if (cleaned.isEmpty()) {
             ic.commitText("", 1)

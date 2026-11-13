@@ -1,9 +1,18 @@
 package com.flowkey.ime
 
+import com.flowkey.ime.PunctuationCommands.Break
+import com.flowkey.ime.PunctuationCommands.CloseQuote
+import com.flowkey.ime.PunctuationCommands.Command
+import com.flowkey.ime.PunctuationCommands.OpenQuote
+import com.flowkey.ime.PunctuationCommands.Piece
+import com.flowkey.ime.PunctuationCommands.Punct
+import com.flowkey.ime.PunctuationCommands.Scratch
+import com.flowkey.ime.PunctuationCommands.Word
+
 /**
  * Rule-based post-processing of a finalized utterance:
- * fillers, spoken punctuation commands (English), "scratch that",
- * user dictionary replacements, snippets, capitalization and spacing.
+ * fillers, spoken punctuation commands (per language, see [PunctuationCommands]),
+ * "scratch that", user dictionary replacements, snippets, capitalization and spacing.
  */
 object TextCleanup {
 
@@ -15,38 +24,13 @@ object TextCleanup {
         "este", "pues",                                            // es
     )
 
-    // Internal markers so quotes can get asymmetric spacing during assembly.
-    private const val OPEN_QUOTE_MARK = "<<OPEN_QUOTE>>"
-    private const val CLOSE_QUOTE_MARK = "<<CLOSE_QUOTE>>"
+    /** Punctuation Whisper attaches to a word, removed when a spoken command follows. */
+    private const val TRAILING_PUNCT = ".,!?;:…"
 
-    // Spoken punctuation commands are English-only for now.
-    private val TWO_WORD_COMMANDS = mapOf(
-        "full stop" to ".",
-        "question mark" to "?",
-        "exclamation mark" to "!",
-        "exclamation point" to "!",
-        "new line" to "\n",
-        "new paragraph" to "\n\n",
-        "open quote" to OPEN_QUOTE_MARK,
-        "close quote" to CLOSE_QUOTE_MARK,
-    )
-
-    private val ONE_WORD_COMMANDS = mapOf(
-        "period" to ".",
-        "comma" to ",",
-        "colon" to ":",
-        "semicolon" to ";",
-        "dash" to "-",
-        "hyphen" to "-",
-    )
-
-    private sealed interface Piece
-    private data class Word(val text: String) : Piece
-    private data class Punct(val symbol: String) : Piece
-    private data class Break(val text: String) : Piece
-    private data object OpenQuote : Piece
-    private data object CloseQuote : Piece
-
+    /**
+     * @param commandLanguage language whose spoken commands apply; null = unknown (English
+     *   commands, no English-only "i" fix); a language without a table gets no commands.
+     */
     fun process(
         raw: String,
         capitalizeStart: Boolean,
@@ -54,7 +38,7 @@ object TextCleanup {
         snippets: List<UserData.Entry>,
         removeFillers: Boolean = true,
         punctuationCommands: Boolean = true,
-        capitalizeEnglishI: Boolean = true,
+        commandLanguage: String? = "en",
     ): String {
         var text = raw.trim()
         if (text.isEmpty()) return ""
@@ -62,67 +46,76 @@ object TextCleanup {
         for ((from, to) in snippets) text = replacePhrase(text, from, to)
         for ((from, to) in dictionary) text = replacePhrase(text, from, to)
 
-        val pieces = parse(text, removeFillers, punctuationCommands)
+        val pieces = parse(text, removeFillers, commands(commandLanguage, punctuationCommands))
         var out = assemble(pieces)
 
         out = out.replace(Regex(" {2,}"), " ")
         out = out.replace(Regex(" +\n"), "\n").replace(Regex("\n +"), "\n")
-        out = out.replace(Regex(" +([.,!?;:])"), "$1")
+        out = out.replace(Regex(" +([.,!?;:…])"), "$1")
         out = capitalizeSentences(out, capitalizeStart)
-        if (capitalizeEnglishI) {
+        if (commandLanguage == "en") {
             // covers i, i'm, i'll, i've, i'd — English only ("i" is a word in Czech)
             out = out.replace(Regex("\\bi\\b"), "I")
         }
         return out.trim(' ')
     }
 
-    private fun parse(
-        text: String,
-        removeFillers: Boolean,
-        punctuationCommands: Boolean,
-    ): List<Piece> {
-        val tokens = text.split(Regex("\\s+"))
+    /** The active commands; with punctuation commands off, "scratch that" still works. */
+    private fun commands(lang: String?, punctuationCommands: Boolean): List<Command> {
+        val table = PunctuationCommands.tableFor(lang)
+        return if (punctuationCommands) table else table.filter { it.pieces == listOf(Scratch) }
+    }
+
+    private fun parse(text: String, removeFillers: Boolean, commands: List<Command>): List<Piece> {
+        val tokens = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        // Whisper attaches punctuation to words; commands match on the normalized form only.
+        val norm = tokens.map { PunctuationCommands.normalize(it) }
+
+        fun matchAt(i: Int): Command? {
+            for (c in commands) {
+                val n = c.words.size
+                if (i + n > tokens.size) continue
+                if ((0 until n).any { norm[i + it] != c.words[it] }) continue
+                // Ambiguous words only count at the end or directly before another command.
+                if (!c.endOnly || i + n == tokens.size || matchAt(i + n) != null) return c
+            }
+            return null
+        }
+
         val pieces = mutableListOf<Piece>()
         var i = 0
         while (i < tokens.size) {
-            // Whisper attaches punctuation to words; strip it for command matching only.
-            val bare = tokens[i].lowercase().trim { !it.isLetterOrDigit() && it != '\'' }
-            val two = if (i + 1 < tokens.size) {
-                bare + " " + tokens[i + 1].lowercase().trim { !it.isLetterOrDigit() && it != '\'' }
-            } else null
-
-            if (two == "scratch that") {
-                pieces.clear()
-                i += 2
+            val command = matchAt(i)
+            if (command != null) {
+                for (piece in command.pieces) {
+                    when (piece) {
+                        Scratch -> pieces.clear()
+                        is Punct -> {
+                            stripTrailingPunct(pieces)
+                            pieces += piece
+                        }
+                        else -> pieces += piece
+                    }
+                }
+                i += command.words.size
                 continue
             }
-            val twoSymbol = if (punctuationCommands) two?.let { TWO_WORD_COMMANDS[it] } else null
-            if (twoSymbol != null) {
-                pieces += pieceFor(twoSymbol)
-                i += 2
-                continue
-            }
-            val oneSymbol = if (punctuationCommands) ONE_WORD_COMMANDS[bare] else null
-            if (oneSymbol != null) {
-                pieces += pieceFor(oneSymbol)
+            if (removeFillers && norm[i] in FILLERS) {
                 i++
                 continue
             }
-            if (removeFillers && bare in FILLERS) {
-                i++
-                continue
-            }
-            if (tokens[i].isNotEmpty()) pieces += Word(tokens[i])
+            pieces += Word(tokens[i])
             i++
         }
         return pieces
     }
 
-    private fun pieceFor(symbol: String): Piece = when (symbol) {
-        "\n", "\n\n" -> Break(symbol)
-        OPEN_QUOTE_MARK -> OpenQuote
-        CLOSE_QUOTE_MARK -> CloseQuote
-        else -> Punct(symbol)
+    /** "Hello," + spoken "comma" must give "Hello," not "Hello,,". */
+    private fun stripTrailingPunct(pieces: MutableList<Piece>) {
+        val last = pieces.lastOrNull() as? Word ?: return
+        val stripped = last.text.trimEnd { it in TRAILING_PUNCT }
+        if (stripped.length == last.text.length) return
+        if (stripped.isEmpty()) pieces.removeAt(pieces.lastIndex) else pieces[pieces.lastIndex] = Word(stripped)
     }
 
     private fun assemble(pieces: List<Piece>): String {
@@ -136,9 +129,9 @@ object TextCleanup {
                     pendingSpace = true
                 }
                 is Punct -> {
-                    if (piece.symbol == "-") {
+                    if (piece.symbol == "-" || piece.symbol == "—") {
                         if (pendingSpace && sb.isNotEmpty()) sb.append(' ')
-                        sb.append('-')
+                        sb.append(piece.symbol)
                     } else {
                         sb.append(piece.symbol)
                     }
@@ -148,6 +141,7 @@ object TextCleanup {
                     sb.append(piece.text)
                     pendingSpace = false
                 }
+                Scratch -> Unit // consumed while parsing
                 OpenQuote -> {
                     if (pendingSpace && sb.isNotEmpty()) sb.append(' ')
                     sb.append('"')
