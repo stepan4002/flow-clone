@@ -1,5 +1,7 @@
-"""Rotating file log in %APPDATA%/FlowClone/logs + console output."""
+"""Rotating file log in %APPDATA%/FlowClone/logs + console output (when there is a console)."""
 import logging
+import os
+import sys
 from logging.handlers import RotatingFileHandler
 
 from .config import APP_DIR
@@ -20,7 +22,16 @@ def setup_logging() -> logging.Logger:
     fh.setFormatter(fmt)
     logger.addHandler(fh)
 
-    ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter("%(levelname)-7s %(message)s"))
-    logger.addHandler(ch)
+    if _has_console():
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)-7s %(message)s"))
+        logger.addHandler(ch)
     return logger
+
+
+def _has_console() -> bool:
+    """False in the windowed FlowClone.exe / pythonw (stderr None or redirected to devnull)."""
+    err = sys.stderr
+    if err is None:
+        return False
+    return getattr(err, "name", None) != os.devnull

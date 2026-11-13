@@ -1,22 +1,35 @@
 """System tray icon with the app menu."""
+import logging
 import os
+import subprocess
 import threading
 
 import pystray
-from PIL import Image, ImageDraw
 
 from .config import APP_DIR, HISTORY_PATH
+from .icon import draw_icon
 
 
-def _make_icon_image(active: bool = False) -> Image.Image:
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    color = (229, 72, 77, 255) if active else (74, 144, 217, 255)
-    d.ellipse((8, 8, 56, 56), fill=(28, 28, 30, 255))
-    d.rounded_rectangle((26, 16, 38, 38), radius=6, fill=color)   # mic body
-    d.arc((20, 26, 44, 46), start=0, end=180, fill=color, width=3)
-    d.line((32, 46, 32, 52), fill=color, width=3)
-    return img
+def _make_icon_image(active: bool = False):
+    return draw_icon(64, active)
+
+
+log = logging.getLogger("flowclone")
+
+
+def _safe(fn, *args):
+    try:
+        fn(*args)
+    except Exception:
+        log.exception("tray action failed")
+
+
+def _open_history():
+    def run():
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_PATH.touch(exist_ok=True)
+        subprocess.Popen(["notepad.exe", str(HISTORY_PATH)])
+    _safe(run)
 
 
 class Tray:
@@ -27,9 +40,11 @@ class Tray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Toggle hands-free dictation", lambda: app.toggle_hands_free()),
             pystray.MenuItem("Paste last transcript", lambda: app.paste_last()),
-            pystray.MenuItem("Open history file", lambda: os.startfile(HISTORY_PATH)),
-            pystray.MenuItem("Open settings folder", lambda: os.startfile(APP_DIR)),
+            pystray.MenuItem("Open history file", lambda: _open_history()),
+            pystray.MenuItem("Open settings folder", lambda: _safe(os.startfile, APP_DIR)),
             pystray.MenuItem("Reload dictionary && snippets", lambda: app.lexicon.reload()),
+            pystray.MenuItem("Retry speech model download", lambda: app.retry_model_load(),
+                             enabled=lambda item: app.model_failed),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", lambda: app.quit()),
         )
@@ -40,6 +55,18 @@ class Tray:
 
     def set_active(self, active: bool):
         self.icon.icon = _make_icon_image(active)
+
+    def set_tooltip(self, text: str):
+        try:
+            self.icon.title = text[:127]  # Windows tooltip limit
+        except Exception:
+            log.debug("tooltip update failed", exc_info=True)
+
+    def refresh_menu(self):
+        try:
+            self.icon.update_menu()
+        except Exception:
+            log.debug("menu refresh failed", exc_info=True)
 
     def stop(self):
         self.icon.stop()

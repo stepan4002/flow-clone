@@ -4,12 +4,11 @@ Tabs: Home (stats + recent dictations), Dictionary, Snippets, Settings, About.
 Must be created on the tkinter thread: tray calls overlay.schedule(lambda: open_hub(app)).
 """
 import json
-import sys
+import logging
 import tkinter as tk
-from pathlib import Path
 from tkinter import messagebox, ttk
 
-from . import config as cfg
+from . import config as cfg, paths
 from .config import CONFIG_PATH, DICTIONARY_PATH, HISTORY_PATH, SNIPPETS_PATH
 
 _AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -30,21 +29,48 @@ def open_hub(app):
 
 # ---------- autostart (HKCU Run key) ----------
 
-def _run_command() -> str:
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    exe = pythonw if pythonw.exists() else Path(sys.executable)
-    run_py = Path(__file__).resolve().parent.parent / "run.py"
-    return f'"{exe}" "{run_py}"'
+log = logging.getLogger("flowclone")
 
 
-def is_autostart_enabled() -> bool:
+def _autostart_value() -> str | None:
     import winreg
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY) as k:
-            winreg.QueryValueEx(k, _AUTOSTART_NAME)
-        return True
+            value, _type = winreg.QueryValueEx(k, _AUTOSTART_NAME)
+        return str(value)
     except OSError:
-        return False
+        return None
+
+
+def is_autostart_enabled() -> bool:
+    """True only if the Run value starts THIS FlowClone (not another install)."""
+    value = _autostart_value()
+    return value is not None and value.strip().lower() == paths.launch_command().lower()
+
+
+def _command_target(command: str) -> str:
+    """The executable path of a Run-key command line ("C:\\x\\y.exe" "arg" -> C:\\x\\y.exe)."""
+    command = command.strip()
+    if command.startswith('"'):
+        return command[1:].split('"', 1)[0]
+    return command.split(" ", 1)[0]
+
+
+def ensure_autostart_current() -> None:
+    """Repair a Run value left pointing at a FlowClone that no longer exists (e.g. after
+    moving from the script install to FlowClone.exe). Another existing install is left alone."""
+    import os
+    value = _autostart_value()
+    if value is None or value.strip().lower() == paths.launch_command().lower():
+        return
+    if os.path.exists(_command_target(value)):
+        log.info("autostart points to another FlowClone install (%s); leaving it", value)
+        return
+    try:
+        set_autostart(True)
+        log.info("autostart repaired: %s -> %s", value, paths.launch_command())
+    except OSError as e:
+        log.warning("could not repair autostart: %s", e)
 
 
 def set_autostart(enabled: bool):
@@ -52,7 +78,7 @@ def set_autostart(enabled: bool):
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0,
                         winreg.KEY_SET_VALUE) as k:
         if enabled:
-            winreg.SetValueEx(k, _AUTOSTART_NAME, 0, winreg.REG_SZ, _run_command())
+            winreg.SetValueEx(k, _AUTOSTART_NAME, 0, winreg.REG_SZ, paths.launch_command())
         else:
             try:
                 winreg.DeleteValue(k, _AUTOSTART_NAME)
@@ -261,16 +287,23 @@ class HubWindow:
         eng = ttk.LabelFrame(f, text="Speech engine  (restart required)", padding=8)
         eng.pack(fill="x", pady=4)
         self._engine = tk.StringVar(value=c["engine"])
-        row = ttk.Frame(eng); row.pack(fill="x")
-        ttk.Label(row, text="Engine:").pack(side="left")
-        ttk.Combobox(row, textvariable=self._engine, state="readonly", width=12,
-                     values=["parakeet", "whisper"]).pack(side="left", padx=6)
         self._wmodel = tk.StringVar(value=c["whisper_model"])
-        ttk.Label(row, text="Whisper model:").pack(side="left", padx=(14, 0))
-        ttk.Combobox(row, textvariable=self._wmodel, state="readonly", width=16,
-                     values=["tiny", "base", "small", "medium", "large-v3-turbo"]).pack(side="left", padx=6)
-        ttk.Label(eng, text="Parakeet: EN/CS/FR/ES + 21 more European languages, auto-detected. "
-                            "Whisper: 90+ languages.", foreground="#666").pack(anchor="w", pady=(4, 0))
+        if paths.is_frozen():
+            # FlowClone.exe ships Parakeet only (faster-whisper would double the download).
+            ttk.Label(eng, text="Engine: NVIDIA Parakeet — EN/CS/FR/ES + 21 more European "
+                                "languages, auto-detected.").pack(anchor="w")
+            ttk.Label(eng, text="The Whisper engine is available in the script install "
+                                "(see README).", foreground="#666").pack(anchor="w", pady=(4, 0))
+        else:
+            row = ttk.Frame(eng); row.pack(fill="x")
+            ttk.Label(row, text="Engine:").pack(side="left")
+            ttk.Combobox(row, textvariable=self._engine, state="readonly", width=12,
+                         values=["parakeet", "whisper"]).pack(side="left", padx=6)
+            ttk.Label(row, text="Whisper model:").pack(side="left", padx=(14, 0))
+            ttk.Combobox(row, textvariable=self._wmodel, state="readonly", width=16,
+                         values=["tiny", "base", "small", "medium", "large-v3-turbo"]).pack(side="left", padx=6)
+            ttk.Label(eng, text="Parakeet: EN/CS/FR/ES + 21 more European languages, auto-detected. "
+                                "Whisper: 90+ languages.", foreground="#666").pack(anchor="w", pady=(4, 0))
 
         hot = ttk.LabelFrame(f, text="Hotkey  (restart required)", padding=8)
         hot.pack(fill="x", pady=4)
@@ -368,8 +401,9 @@ class HubWindow:
         about = (
             "Hold Ctrl+Win anywhere, speak, release — polished text is inserted into\n"
             "the focused app. Nothing you say ever leaves this computer.\n\n"
-            "Speech model: NVIDIA Parakeet-TDT-0.6B-v3 (CC-BY-4.0) via onnx-asr,\n"
-            "or faster-whisper (MIT). Optional AI polish: local Ollama.\n\n"
+            "Speech model: NVIDIA Parakeet-TDT-0.6B-v3 (CC-BY-4.0) via onnx-asr"
+            + ("" if paths.is_frozen() else ",\nor faster-whisper (MIT)")
+            + ". Optional AI polish: local Ollama.\n\n"
             f"Settings folder: {CONFIG_PATH.parent}\n"
             "Logs: settings folder → logs\\flowclone.log"
         )

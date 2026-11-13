@@ -9,9 +9,12 @@ Files (auto-created with examples in %APPDATA%/FlowClone):
     say the trigger anywhere in a dictation -> the expansion is inserted in its place
 """
 import json
+import logging
 import re
 
 from .config import DICTIONARY_PATH, SNIPPETS_PATH
+
+log = logging.getLogger("flowclone")
 
 _DEFAULT_DICTIONARY = {
     "words": ["FlowClone", "GitHub"],
@@ -33,7 +36,7 @@ def _load(path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        print(f"[lexicon] failed to read {path}: {e}")
+        log.warning("failed to read %s: %s", path, e)
         return dict(default)
 
 

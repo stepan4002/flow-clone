@@ -9,9 +9,12 @@ Known quirk (Wispr Flow has it too): only plain-text clipboard content is
 saved/restored; a copied image is lost when a dictation fires.
 """
 import time
+import logging
 
 import keyboard
 import pyperclip
+
+log = logging.getLogger("flowclone")
 
 
 def insert_text(text: str, mode: str = "paste", restore_delay_ms: int = 300,
@@ -44,4 +47,4 @@ def copy_to_clipboard(text: str):
     try:
         pyperclip.copy(text)
     except pyperclip.PyperclipException as e:
-        print(f"[inject] clipboard copy failed: {e}")
+        log.warning("clipboard copy failed: %s", e)

@@ -5,15 +5,23 @@ All tkinter work happens on this module's thread. Other threads use set_state()
 for the pill and schedule() to run UI callables (e.g. opening the Hub).
 """
 import queue
+import logging
 import threading
 import tkinter as tk
+
+log = logging.getLogger("flowclone")
 
 _STATES = {
     "recording": ("#e5484d", "●  Listening…"),
     "hands_free": ("#e5484d", "●  Hands-free — hotkey or Esc to stop"),
     "processing": ("#f0a020", "…  Transcribing"),
     "loading": ("#4a90d9", "⏳  Loading speech model…"),
+    "downloading": ("#4a90d9", "⬇  Downloading speech model…"),
 }
+# States shown even when the user turned the pill off: the one-time model download
+# and its failure would otherwise be invisible.
+_ALWAYS_SHOWN = {"downloading", "model_error"}
+_PILL_W, _PILL_H = 360, 40
 _BG = "#1c1c1e"
 _TRANSPARENT = "#010203"  # color-keyed to transparent for rounded corners
 
@@ -24,6 +32,7 @@ class Overlay:
         self._q: queue.Queue = queue.Queue()
         self._pulse_on = False
         self._state = "hidden"
+        self._flash_id = None
         self.root: tk.Tk | None = None
         self._ready = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="ui").start()
@@ -33,6 +42,10 @@ class Overlay:
 
     def set_state(self, state: str, message: str | None = None, flash_ms: int = 0):
         self._q.put(("state", state, message, flash_ms))
+
+    @property
+    def state(self) -> str:
+        return self._state
 
     def schedule(self, fn):
         """Run fn() on the tkinter thread (used by tray to open the Hub)."""
@@ -44,6 +57,11 @@ class Overlay:
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.title("FlowClone")
+        try:  # default icon for every FlowClone window (the Hub included)
+            from . import paths
+            self.root.iconbitmap(default=str(paths.resource("assets/flowclone.ico")))
+        except Exception:
+            log.debug("window icon not set", exc_info=True)
 
         self.pill = tk.Toplevel(self.root)
         self.pill.overrideredirect(True)
@@ -75,16 +93,39 @@ class Overlay:
 
     def _apply_state(self, state, message, flash_ms):
         self._state = state
-        if state == "hidden" or not self.show_pill:
+        # A flash scheduled for an earlier message must not hide this one.
+        if self._flash_id is not None:
+            self.pill.after_cancel(self._flash_id)
+            self._flash_id = None
+        if state == "hidden" or (not self.show_pill and state not in _ALWAYS_SHOWN):
             self.pill.withdraw()
             return
-        color, default_text = _STATES.get(state, ("#ffffff", state))
-        self.canvas.itemconfigure(self._text, text=message or default_text, fill=color)
+        color, default_text = _STATES.get(state, ("#f0a020", ""))
+        self.canvas.itemconfigure(self._text, text=self._fit(message or default_text), fill=color)
         self.pill.deiconify()
         self.pill.attributes("-topmost", True)
         self._place()
         if flash_ms:
-            self.pill.after(flash_ms, self.pill.withdraw)
+            self._flash_id = self.pill.after(flash_ms, self._flash_done)
+
+    def _flash_done(self):
+        self._flash_id = None
+        self._state = "hidden"
+        self.pill.withdraw()
+
+    def _fit(self, text: str) -> str:
+        """Ellipsize text that would not fit on the pill."""
+        try:
+            import tkinter.font as tkfont
+            font = tkfont.Font(font=self.canvas.itemcget(self._text, "font"))
+            limit = _PILL_W - 24
+            if font.measure(text) <= limit:
+                return text
+            while text and font.measure(text + "…") > limit:
+                text = text[:-1]
+            return text + "…"
+        except Exception:
+            return text[:48]
 
     def _poll(self):
         try:
@@ -96,7 +137,7 @@ class Overlay:
                     try:
                         a()
                     except Exception as e:
-                        print(f"[ui] scheduled call failed: {e}")
+                        log.exception("scheduled UI call failed: %s", e)
         except queue.Empty:
             pass
         self.root.after(60, self._poll)

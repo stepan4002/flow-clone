@@ -1,7 +1,10 @@
 """Configuration: loaded from %APPDATA%/FlowClone/config.json, merged over defaults."""
 import json
 import os
+import logging
 from pathlib import Path
+
+log = logging.getLogger("flowclone")
 
 APP_DIR = Path(os.environ.get("APPDATA", Path.home())) / "FlowClone"
 CONFIG_PATH = APP_DIR / "config.json"
@@ -68,12 +71,12 @@ def load_config() -> dict:
         try:
             user = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
-            print(f"[config] failed to read {CONFIG_PATH}: {e} — using defaults")
+            log.warning("failed to read %s: %s — using defaults", CONFIG_PATH, e)
             user = {}
     else:
         user = {}
         CONFIG_PATH.write_text(json.dumps(DEFAULTS, indent=2), encoding="utf-8")
-        print(f"[config] wrote default config to {CONFIG_PATH}")
+        log.info("wrote default config to %s", CONFIG_PATH)
     return _merge(DEFAULTS, user)
 
 

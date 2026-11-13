@@ -1,8 +1,11 @@
 """Microphone capture via sounddevice: 16 kHz mono float32."""
 import threading
+import logging
 
 import numpy as np
 import sounddevice as sd
+
+log = logging.getLogger("flowclone")
 
 
 class Recorder:
@@ -31,7 +34,7 @@ class Recorder:
 
     def _callback(self, indata, frames, time_info, status):
         if status:
-            print(f"[audio] {status}")
+            log.warning("audio: %s", status)
         self._chunks.append(indata[:, 0].copy())
 
     def stop(self) -> np.ndarray:

@@ -23,6 +23,9 @@ from .stt import create_engine
 from .tray import Tray
 
 _SINGLE_INSTANCE_PORT = 47831
+# Named mutex created only by FlowClone.exe, so the installer can detect (and close) a
+# running exe without confusing it with a source/pythonw run.
+_EXE_MUTEX = "Local\\FlowCloneExe"
 
 
 class FlowApp:
@@ -42,9 +45,15 @@ class FlowApp:
         self.tray = Tray(self)
 
         self.engine = None
+        self.model_failed = False
+        self._model_pct = 0
+        self._loader: threading.Thread | None = None
+        self._loader_lock = threading.Lock()
+        self._cancel_download = threading.Event()
         self._engine_ready = threading.Event()
         self._quit = threading.Event()
         self._instance_lock: socket.socket | None = None
+        self._mutex = None
 
         self.recording = False
         self.hands_free = False
@@ -57,10 +66,19 @@ class FlowApp:
 
     def start(self):
         if not self._acquire_single_instance():
-            self.log.error("FlowClone is already running — exiting this copy.")
+            self.log.info("FlowClone is already running — asking it to show the Hub.")
+            if not _ask_running_instance_to_show():
+                from .crash import show_fatal
+                show_fatal("FlowClone is already running.\n\n"
+                           "Look for its microphone icon in the system tray.")
             return
         self.tray.start()
-        threading.Thread(target=self._load_engine, daemon=True, name="model-loader").start()
+        try:
+            from .hub import ensure_autostart_current
+            ensure_autostart_current()
+        except Exception:
+            self.log.exception("autostart check failed")
+        self.retry_model_load()
         self.hotkeys = HotkeyManager(
             self.config,
             on_press=self._on_ptt_press,
@@ -81,27 +99,90 @@ class FlowApp:
         self.tray.stop()
 
     def quit(self):
+        self._cancel_download.set()  # a running download stops at the next chunk (resumable)
         self._quit.set()
 
     def _acquire_single_instance(self) -> bool:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.bind(("127.0.0.1", _SINGLE_INSTANCE_PORT))
-            s.listen(1)
+            s.listen(4)
             self._instance_lock = s  # held for the process lifetime
-            return True
         except OSError:
             return False
+        threading.Thread(target=self._serve_instance_requests, daemon=True,
+                         name="single-instance").start()
+        from . import paths
+        if paths.is_frozen():
+            try:
+                import ctypes
+                self._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _EXE_MUTEX)
+            except Exception:
+                self.log.warning("could not create the single-instance mutex", exc_info=True)
+        return True
+
+    def _serve_instance_requests(self):
+        """A second launch connects here and sends 'show': bring up the Hub."""
+        while not self._quit.is_set():
+            try:
+                conn, _addr = self._instance_lock.accept()
+            except OSError:
+                return
+            with conn:
+                try:
+                    conn.settimeout(2)
+                    if conn.recv(16).strip() == b"show":
+                        self.open_hub()
+                except OSError:
+                    pass
+
+    def retry_model_load(self):
+        """Start (or restart after a failure) loading the speech engine in the background."""
+        with self._loader_lock:
+            if self.engine is not None or (self._loader and self._loader.is_alive()):
+                return
+            self.model_failed = False
+            self.tray.refresh_menu()
+            self._loader = threading.Thread(target=self._load_engine, daemon=True,
+                                            name="model-loader")
+            self._loader.start()
+
+    def _on_model_progress(self, done: int, total: int):
+        pct = int(done * 100 / total) if total else 0
+        self._model_pct = pct
+        text = f"Downloading speech model… {pct}% ({done // 1_000_000}/{total // 1_000_000} MB)"
+        self.tray.set_tooltip(f"FlowClone — downloading speech model {pct}%")
+        # Never paint over recording / transcribing feedback.
+        if self.overlay.state in ("hidden", "loading", "downloading"):
+            self.overlay.set_state("downloading", text)
 
     def _load_engine(self):
+        from .model_store import ModelError
         self.overlay.set_state("loading")
         try:
-            self.engine = create_engine(self.config)
+            self.engine = create_engine(
+                self.config, progress_cb=self._on_model_progress,
+                cancel_event=self._cancel_download,
+                on_fallback=lambda msg: self.overlay.set_state(
+                    "processing", f"{msg} — using Parakeet", flash_ms=5000))
             self._engine_ready.set()
-            self.overlay.set_state("hidden")
+            self.tray.set_tooltip("FlowClone")
+            if self.overlay.state in ("loading", "downloading"):
+                self.overlay.set_state("hidden")
             self.log.info("engine ready: %s", self.engine.name)
+        except ModelError as e:
+            if self._quit.is_set():
+                return
+            self.model_failed = True
+            self.tray.refresh_menu()
+            self.tray.set_tooltip(f"FlowClone — speech model download failed: {e.short}")
+            self.overlay.set_state("model_error", f"Model download failed: {e.short}")
+            self.log.error("speech model unavailable: %s (to install it by hand, put the "
+                           "model files into %s)", e, _model_target())
         except Exception as e:  # engine load failure is fatal for dictation
-            self.overlay.set_state("processing", f"Model load failed: {e}", flash_ms=6000)
+            self.model_failed = True
+            self.tray.refresh_menu()
+            self.overlay.set_state("model_error", f"Model load failed: {e}")
             self.log.exception("engine load failed")
 
     def open_hub(self):
@@ -121,6 +202,17 @@ class FlowApp:
             self._stop_hands_free()
             return
         if self.recording:
+            return
+        if not self._engine_ready.is_set():
+            # Don't record into the void while the model is still downloading/loading.
+            if self.model_failed:
+                msg = "Speech model missing — tray menu → Retry download"
+            elif self._model_pct:
+                msg = f"Speech model not ready yet ({self._model_pct}%)"
+            else:
+                msg = "Speech model still loading…"
+            self.overlay.set_state("processing", msg, flash_ms=2500)
+            self.sounds.play("error")
             return
         self._press_time = time.time()
         self._start_recording()
@@ -267,6 +359,20 @@ class FlowApp:
         last = self.history.last()
         if last:
             inject.copy_to_clipboard(last)
+
+
+def _ask_running_instance_to_show() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", _SINGLE_INSTANCE_PORT), timeout=2) as c:
+            c.sendall(b"show\n")
+        return True
+    except OSError:
+        return False
+
+
+def _model_target():
+    from .model_store import target_dir
+    return target_dir()
 
 
 def main():

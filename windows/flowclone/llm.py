@@ -6,8 +6,11 @@ to the app you're dictating into. Enable with config llm.enabled = true after
 installing Ollama and running:  ollama pull qwen3:1.7b
 """
 import re
+import logging
 
 import requests
+
+log = logging.getLogger("flowclone")
 
 _SYSTEM = """You clean up raw voice-dictation transcripts. Rules:
 - Remove filler words, false starts and repeated words.
@@ -37,7 +40,7 @@ class OllamaPolisher:
             except requests.RequestException:
                 self._available = False
             if not self._available:
-                print("[llm] Ollama not reachable — using rule-based cleanup only")
+                log.info("Ollama not reachable — using rule-based cleanup only")
         return self._available
 
     def polish(self, text: str, app_name: str | None = None) -> str:
@@ -68,5 +71,5 @@ class OllamaPolisher:
             if out and len(out) < len(text) * 3:
                 return out
         except requests.RequestException as e:
-            print(f"[llm] polish failed ({e}) — falling back to rules-only")
+            log.warning("polish failed (%s) — falling back to rules-only", e)
         return text
