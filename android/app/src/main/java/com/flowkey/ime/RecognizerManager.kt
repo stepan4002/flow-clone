@@ -61,6 +61,11 @@ object RecognizerManager {
     @Synchronized
     fun initialize(context: Context, force: Boolean = false) {
         val appContext = context.applicationContext
+        if (Prefs.isStreamingLoadPending(appContext)) {
+            // The last streaming load never finished: native code killed the process.
+            Log.e(TAG, "Previous streaming model load crashed; falling back to Whisper")
+            Prefs.disableStreamingAfterCrash(appContext)
+        }
         val wantStreaming = Prefs.isStreamingMode(appContext)
         when (val current = _state.value) {
             is State.Loading -> return
@@ -140,7 +145,10 @@ object RecognizerManager {
                 tokens = model.tokens,
                 numThreads = 2,
                 provider = "cpu",
-                modelType = "zipformer",
+                // The bundled sherpa-onnx-streaming-zipformer-en-2023-06-26 is a Zipformer2
+                // model ("model_type" metadata). "zipformer" makes sherpa-onnx look for
+                // Zipformer1 metadata and exit the process when it is missing.
+                modelType = "zipformer2",
             ),
             endpointConfig = EndpointConfig(
                 rule1 = EndpointRule(false, 2.4f, 0.0f),
@@ -150,7 +158,13 @@ object RecognizerManager {
             enableEndpoint = true,
             decodingMethod = "greedy_search",
         )
-        val recognizer = OnlineRecognizer(config = config)
+        Prefs.setStreamingLoadPending(context, true)
+        val recognizer = try {
+            OnlineRecognizer(config = config)
+        } finally {
+            // Reached on success or on a Java-level error; a native abort never gets here.
+            Prefs.setStreamingLoadPending(context, false)
+        }
         loadedStreamingMode = true
         loadedLanguage = "en"
         _state.value = State.Ready(Engine.Streaming(recognizer))

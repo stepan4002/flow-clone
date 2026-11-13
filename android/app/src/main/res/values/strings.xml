@@ -58,6 +58,8 @@
 
     <string name="setup_engine_title">Engine</string>
     <string name="setup_streaming_switch">English streaming mode (live partial text)</string>
+    <string name="streaming_crash_title">Streaming mode turned off</string>
+    <string name="streaming_crash_message">The streaming model crashed FlowKey while loading, so FlowKey switched back to the Whisper engine. Dictation works normally. If you copied your own streaming model, check that it is the one listed in MODELS.md.</string>
     <string name="setup_streaming_desc">Default engine is multilingual Whisper (EN, CS, FR, ES, auto-detect): speak, then it transcribes when you stop. Streaming mode shows words as you speak but is English-only and needs the Zipformer model.</string>
 
     <string name="setup_test_title">Try it</string>

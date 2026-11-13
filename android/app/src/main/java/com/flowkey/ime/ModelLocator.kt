@@ -88,14 +88,24 @@ object ModelLocator {
     private fun ensureAssetsCopied(context: Context) {
         if (assetsCopied) return
         assetsCopied = true
+        // Re-copy bundled models once per install/update: replaces files from older builds
+        // and any copy that was cut short before the copy became atomic.
+        val stamp = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
+        } catch (_: Exception) {
+            ""
+        }
+        val marker = File(modelRoot(context), ".bundled-copy")
+        val fresh = stamp.isNotEmpty() && marker.isFile && marker.readText() == stamp
         try {
-            copyAssetDir(context, "model", modelRoot(context))
+            copyAssetDir(context, "model", modelRoot(context), overwrite = !fresh)
+            if (stamp.isNotEmpty()) marker.writeText(stamp)
         } catch (_: IOException) {
             // No bundled models, or copy failed; on-disk models may still exist.
         }
     }
 
-    private fun copyAssetDir(context: Context, assetPath: String, target: File) {
+    private fun copyAssetDir(context: Context, assetPath: String, target: File, overwrite: Boolean) {
         val names = context.assets.list(assetPath) ?: return
         if (names.isEmpty()) return
         target.mkdirs()
@@ -103,16 +113,22 @@ object ModelLocator {
             val childAsset = "$assetPath/$name"
             val children = context.assets.list(childAsset)
             if (children != null && children.isNotEmpty()) {
-                copyAssetDir(context, childAsset, File(target, name))
+                copyAssetDir(context, childAsset, File(target, name), overwrite)
             } else {
                 val out = File(target, name)
-                if (out.exists() && out.length() > 0) continue
+                if (!overwrite && out.exists() && out.length() > 0) continue
+                // Copy to a temp file and rename, so a process killed mid-copy never
+                // leaves a truncated model that later looks complete.
+                val tmp = File(target, "$name.part")
                 try {
                     context.assets.open(childAsset).use { input ->
-                        out.outputStream().use { output -> input.copyTo(output) }
+                        tmp.outputStream().use { output -> input.copyTo(output) }
                     }
+                    if (out.exists()) out.delete()
+                    if (!tmp.renameTo(out)) tmp.delete()
                 } catch (_: IOException) {
                     // Entry was an empty directory or unreadable; skip it.
+                    tmp.delete()
                 }
             }
         }

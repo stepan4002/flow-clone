@@ -70,6 +70,16 @@ class SetupActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         RecognizerManager.initialize(this)
+        if (Prefs.consumeStreamingCrashNotice(this)) {
+            binding.switchStreaming.setOnCheckedChangeListener(null)
+            binding.switchStreaming.isChecked = false
+            setupStreamingSwitchListener()
+            AlertDialog.Builder(this)
+                .setTitle(R.string.streaming_crash_title)
+                .setMessage(R.string.streaming_crash_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
         refreshStatuses()
         renderLists()
     }
@@ -140,6 +150,10 @@ class SetupActivity : AppCompatActivity() {
         }
 
         binding.switchStreaming.isChecked = Prefs.isStreamingMode(this)
+        setupStreamingSwitchListener()
+    }
+
+    private fun setupStreamingSwitchListener() {
         binding.switchStreaming.setOnCheckedChangeListener { _, checked ->
             Prefs.setStreamingMode(this, checked)
             RecognizerManager.initialize(this, force = true)

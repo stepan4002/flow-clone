@@ -3,6 +3,16 @@
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/);
 versioning: [SemVer](https://semver.org/).
 
+## [1.1.1] — 2026-11-13
+
+### Android — FlowKey — fixes
+- Fixed a crash loop when "English streaming mode" is on: the bundled model is a
+  Zipformer2 model, but the engine was told "zipformer", so sherpa-onnx exited the app
+- Crash guard: if the streaming engine ever kills the app while loading, FlowKey turns
+  streaming off on the next start, falls back to Whisper and explains why in setup
+- Bundled models are copied atomically and refreshed once after each app update, so an
+  interrupted copy can no longer leave a broken model file behind
+
 ## [1.1.0] — 2026-11-13
 
 ### Android — FlowKey
