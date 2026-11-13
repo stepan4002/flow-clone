@@ -50,8 +50,15 @@ $version = $Matches[1]
 $outDir = Join-Path $android ("releases\" + (Get-Date -Format 'yyyy-MM-dd') + "-v$version")
 New-Item -ItemType Directory -Force $outDir | Out-Null
 # A re-run must never mix in APKs from an earlier build of the same day.
-Get-ChildItem $outDir -File | Where-Object { $_.Extension -eq '.apk' -or $_.Name -eq 'SHA256SUMS.txt' } |
-    Remove-Item -Force
+# Virus scanners and the search indexer briefly lock fresh files in this folder: retry.
+function Invoke-Retry([scriptblock]$action) {
+    for ($i = 1; $i -le 10; $i++) {
+        try { & $action; return } catch { if ($i -eq 10) { throw } ; Start-Sleep -Milliseconds 500 }
+    }
+}
+# (SHA256SUMS.txt is overwritten at the end instead: deleting it can be refused while locked.)
+Get-ChildItem $outDir -File -Filter '*.apk' |
+    ForEach-Object { $path = $_.FullName; Invoke-Retry { Remove-Item $path -Force -ErrorAction Stop } }
 
 $pwLine = Get-Content $props | Where-Object { $_ -match '^FLOWKEY_STORE_PASSWORD=' } | Select-Object -First 1
 if ($null -eq $pwLine) { throw "FLOWKEY_STORE_PASSWORD missing in $props" }
@@ -125,7 +132,6 @@ $lines = Get-ChildItem $outDir -Filter '*.apk' | Sort-Object Name | ForEach-Obje
     (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + ' *' + $_.Name
 }
 $sums = Join-Path $outDir 'SHA256SUMS.txt'
-Remove-Item $sums -Force -ErrorAction SilentlyContinue  # a scanner may still hold the old one
-[IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
+Invoke-Retry { [IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false)) }
 Write-Host "==> Release files in $outDir"
 Get-ChildItem $outDir | Format-Table Name, Length -AutoSize | Out-Host
