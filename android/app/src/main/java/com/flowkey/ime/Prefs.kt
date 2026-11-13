@@ -15,6 +15,9 @@ object Prefs {
     private const val KEY_STREAMING = "streaming_mode"
     private const val KEY_STREAMING_LOAD_PENDING = "streaming_load_pending"
     private const val KEY_STREAMING_CRASH_NOTICE = "streaming_crash_notice"
+    private const val KEY_HOTWORDS_LOAD_PENDING = "hotwords_load_pending"
+    private const val KEY_HOTWORDS_DISABLED = "hotwords_disabled_after_crash"
+    private const val KEY_HOTWORDS_CRASH_NOTICE = "hotwords_crash_notice"
     private const val KEY_AUTO_STOP = "auto_stop_enabled"
     private const val KEY_AUTO_STOP_MS = "auto_stop_ms"
     private const val KEY_HAPTICS = "haptics_enabled"
@@ -42,6 +45,7 @@ object Prefs {
             synchronized(this) {
                 if (!runtimeMigrated) {
                     val old = prefs(context)
+                    // Only the v1.1 keys ever lived in the settings file.
                     val keys = listOf(KEY_STREAMING_LOAD_PENDING, KEY_STREAMING_CRASH_NOTICE)
                     if (keys.any { old.contains(it) }) {
                         val e = rt.edit()
@@ -152,6 +156,41 @@ object Prefs {
         val p = runtime(context)
         if (!p.getBoolean(KEY_STREAMING_CRASH_NOTICE, false)) return false
         p.edit().putBoolean(KEY_STREAMING_CRASH_NOTICE, false).apply()
+        return true
+    }
+
+    /**
+     * Separate crash guard for hotwords (the user's words in the streaming engine). A crash
+     * while loading WITH hotwords disables only the hotwords, not streaming itself, until the
+     * user changes their words.
+     */
+    fun setHotwordsLoadPending(context: Context, pending: Boolean) {
+        runtime(context).edit().putBoolean(KEY_HOTWORDS_LOAD_PENDING, pending).commit()
+    }
+
+    fun isHotwordsLoadPending(context: Context): Boolean =
+        runtime(context).getBoolean(KEY_HOTWORDS_LOAD_PENDING, false)
+
+    fun isHotwordsDisabledAfterCrash(context: Context): Boolean =
+        runtime(context).getBoolean(KEY_HOTWORDS_DISABLED, false)
+
+    fun disableHotwordsAfterCrash(context: Context) {
+        runtime(context).edit()
+            .putBoolean(KEY_HOTWORDS_LOAD_PENDING, false)
+            .putBoolean(KEY_HOTWORDS_DISABLED, true)
+            .putBoolean(KEY_HOTWORDS_CRASH_NOTICE, true)
+            .commit()
+    }
+
+    /** The user edited their words: give hotwords another try. */
+    fun clearHotwordsDisabled(context: Context) {
+        runtime(context).edit().putBoolean(KEY_HOTWORDS_DISABLED, false).commit()
+    }
+
+    fun consumeHotwordsCrashNotice(context: Context): Boolean {
+        val p = runtime(context)
+        if (!p.getBoolean(KEY_HOTWORDS_CRASH_NOTICE, false)) return false
+        p.edit().putBoolean(KEY_HOTWORDS_CRASH_NOTICE, false).apply()
         return true
     }
 

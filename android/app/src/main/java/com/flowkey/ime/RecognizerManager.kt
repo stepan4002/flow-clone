@@ -2,6 +2,8 @@ package com.flowkey.ime
 
 import android.content.Context
 import android.util.Log
+import java.io.File
+import java.io.IOException
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -64,6 +66,12 @@ object RecognizerManager {
     @Synchronized
     fun initialize(context: Context, force: Boolean = false) {
         val appContext = context.applicationContext
+        // Checked first: a crash with hotwords sets both flags, and only hotwords are to blame.
+        if (Prefs.isHotwordsLoadPending(appContext)) {
+            Log.e(TAG, "Previous streaming load with hotwords crashed; disabling hotwords")
+            Prefs.disableHotwordsAfterCrash(appContext)
+            Prefs.setStreamingLoadPending(appContext, false)
+        }
         if (Prefs.isStreamingLoadPending(appContext)) {
             // The last streaming load never finished: native code killed the process.
             Log.e(TAG, "Previous streaming model load crashed; falling back to Whisper")
@@ -132,7 +140,39 @@ object RecognizerManager {
      */
     fun onUserTermsChanged(context: Context) {
         val appContext = context.applicationContext
+        Prefs.clearHotwordsDisabled(appContext) // each edit earns one more try
         if (Prefs.isStreamingMode(appContext)) initialize(appContext, force = true)
+    }
+
+    /**
+     * Writes the hotwords file for the streaming engine, or returns null when hotwords can't
+     * or shouldn't be used. Every condition here guards a native exit() in sherpa-onnx:
+     * a missing hotwords/vocab file, or hotwords for a model the vocab doesn't belong to.
+     */
+    private fun prepareHotwords(context: Context, model: ModelLocator.ZipformerModel): Pair<String, String>? {
+        if (Prefs.isHotwordsDisabledAfterCrash(context)) {
+            Log.w(TAG, "Hotwords disabled after a crash; using plain greedy search")
+            return null
+        }
+        val lines = Hotwords.format(UserData.userTerms(context))
+        if (lines.isEmpty()) return null
+        val vocab = ModelLocator.bpeVocab(context) ?: return null
+        if (!ModelLocator.vocabMatchesTokens(vocab, File(model.tokens))) {
+            Log.w(TAG, "Streaming model tokens don't match the bundled BPE vocab; no hotwords")
+            return null
+        }
+        return try {
+            val dir = ModelLocator.hotwordsDir(context).apply { mkdirs() }
+            val out = File(dir, "hotwords.txt")
+            val tmp = File(dir, "hotwords.txt.part")
+            tmp.writeText(lines.joinToString("\n", postfix = "\n"))
+            if (out.exists()) out.delete()
+            if (!tmp.renameTo(out)) throw IOException("rename failed")
+            if (out.isFile && vocab.isFile) out.absolutePath to vocab.absolutePath else null
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not write hotwords file; continuing without hotwords", e)
+            null
+        }
     }
 
     private fun loadWhisper(context: Context) {
@@ -155,6 +195,7 @@ object RecognizerManager {
             _state.value = State.ModelMissing(ModelLocator.zipformerDir(context).absolutePath, true)
             return
         }
+        val hot = prepareHotwords(context, model)
         val config = OnlineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
             modelConfig = OnlineModelConfig(
@@ -170,6 +211,9 @@ object RecognizerManager {
                 // model ("model_type" metadata). "zipformer" makes sherpa-onnx look for
                 // Zipformer1 metadata and exit the process when it is missing.
                 modelType = "zipformer2",
+                // Hotwords need the BPE vocab; an empty modelingUnit with hotwords is a native exit.
+                modelingUnit = if (hot != null) "bpe" else "",
+                bpeVocab = hot?.second ?: "",
             ),
             endpointConfig = EndpointConfig(
                 rule1 = EndpointRule(false, 2.4f, 0.0f),
@@ -177,14 +221,21 @@ object RecognizerManager {
                 rule3 = EndpointRule(false, 0.0f, 30.0f),
             ),
             enableEndpoint = true,
-            decodingMethod = "greedy_search",
+            // Hotwords only work with beam search (greedy search ignores them).
+            decodingMethod = if (hot != null) "modified_beam_search" else "greedy_search",
+            maxActivePaths = 4,
+            hotwordsFile = hot?.first ?: "",
+            hotwordsScore = Hotwords.SCORE,
         )
+        Log.i(TAG, "Loading streaming engine (hotwords=${hot != null}, decoding=${config.decodingMethod})")
         Prefs.setStreamingLoadPending(context, true)
+        if (hot != null) Prefs.setHotwordsLoadPending(context, true)
         val recognizer = try {
             OnlineRecognizer(config = config)
         } finally {
             // Reached on success or on a Java-level error; a native abort never gets here.
             Prefs.setStreamingLoadPending(context, false)
+            if (hot != null) Prefs.setHotwordsLoadPending(context, false)
         }
         loadedStreamingMode = true
         loadedLanguage = "en"

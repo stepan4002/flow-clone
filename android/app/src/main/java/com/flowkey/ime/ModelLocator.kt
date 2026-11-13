@@ -33,6 +33,34 @@ object ModelLocator {
 
     fun zipformerDir(context: Context): File = File(modelRoot(context), "zipformer")
 
+    /** Internal (never backed up) copy of assets/hotwords/: the BPE vocab + generated hotwords. */
+    fun hotwordsDir(context: Context): File = File(context.filesDir, "hotwords")
+
+    /** BPE vocabulary of the bundled streaming Zipformer, needed to encode hotwords. */
+    private const val BPE_VOCAB = "en-2023-06-26.bpe.vocab"
+
+    fun bpeVocab(context: Context): File? {
+        ensureAssetsCopied(context)
+        return File(hotwordsDir(context), BPE_VOCAB).takeIf { it.isFile && it.length() > 0 }
+    }
+
+    /**
+     * True if every piece of [vocab] ("piece<TAB>score") is a token of [tokens] ("token id"),
+     * i.e. the vocab belongs to the streaming model in use. A user-supplied model with another
+     * vocabulary must not get hotwords encoded with ours.
+     */
+    fun vocabMatchesTokens(vocab: File, tokens: File): Boolean = try {
+        val known = tokens.readLines().mapNotNullTo(HashSet()) { line ->
+            line.substringBefore(' ').takeIf { it.isNotEmpty() }
+        }
+        val pieces = vocab.readLines().mapNotNull { line ->
+            line.substringBefore('\t').takeIf { it.isNotEmpty() }
+        }
+        pieces.isNotEmpty() && pieces.all { it in known }
+    } catch (_: IOException) {
+        false
+    }
+
     fun locateWhisper(context: Context): WhisperModel? {
         ensureAssetsCopied(context)
         for (dir in listOf(whisperDir(context), modelRoot(context))) {
@@ -99,6 +127,8 @@ object ModelLocator {
         val fresh = stamp.isNotEmpty() && marker.isFile && marker.readText() == stamp
         try {
             copyAssetDir(context, "model", modelRoot(context), overwrite = !fresh)
+            // Before the marker: the same stamp decides whether these are refreshed too.
+            copyAssetDir(context, "hotwords", hotwordsDir(context), overwrite = !fresh)
             if (stamp.isNotEmpty()) marker.writeText(stamp)
         } catch (_: IOException) {
             // No bundled models, or copy failed; on-disk models may still exist.
