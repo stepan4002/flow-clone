@@ -7,6 +7,10 @@ venv/
 windows/build/
 windows/dist/
 *.spec
+!windows/FlowClone.spec
+windows/installer/Output/
+windows/THIRD-PARTY-NOTICES.txt
+selftest.log
 
 # ---------- Android (android/) ----------
 android/.gradle/

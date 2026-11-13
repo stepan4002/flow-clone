@@ -16,6 +16,10 @@
 #   FLOWCLONE_UNINSTALL=1 remove the app, shortcut and autostart entry
 #                         (your settings in %APPDATA%\FlowClone are kept)
 #
+# The standalone FlowClone-Setup.exe (installed in %LOCALAPPDATA%\Programs\FlowClone) is the
+# easier option for most people. If both are installed, this script never removes or
+# overwrites anything that belongs to the exe install.
+#
 # This file is ASCII-only on purpose so Windows PowerShell 5.1 parses it correctly.
 
 function Install-FlowClone {
@@ -26,6 +30,13 @@ function Install-FlowClone {
     $AppDir = Join-Path $Dir 'app'
     $VenvDir = Join-Path $Dir 'venv'
     $Shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'FlowClone.lnk'
+    $ExeInstalled = Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\FlowClone\FlowClone.exe')
+    $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+    function Get-ShortcutTarget($path) {
+        if (-not (Test-Path $path)) { return $null }
+        try { return (New-Object -ComObject WScript.Shell).CreateShortcut($path).TargetPath } catch { return $null }
+    }
 
     function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -40,11 +51,22 @@ function Install-FlowClone {
 
     if ($env:FLOWCLONE_UNINSTALL -eq '1') {
         Stop-RunningFlowClone
-        Write-Step "Removing $Dir"
-        if (Test-Path $Dir) { Remove-Item $Dir -Recurse -Force }
-        if (Test-Path $Shortcut) { Remove-Item $Shortcut -Force }
-        Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'FlowClone' -ErrorAction SilentlyContinue
+        Write-Step "Removing the script install in $Dir"
+        foreach ($sub in 'app', 'venv') {
+            $p = Join-Path $Dir $sub
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+        }
+        # The speech model is shared with FlowClone.exe: keep it while the exe is installed.
+        $models = Join-Path $Dir 'models'
+        if ((Test-Path $models) -and -not $ExeInstalled) { Remove-Item $models -Recurse -Force }
+        if ((Test-Path $Dir) -and -not (Get-ChildItem $Dir -Force)) { Remove-Item $Dir -Force }
+        # Shortcut and autostart only if they belong to this script install.
+        $target = Get-ShortcutTarget $Shortcut
+        if ($target -and $target -like "$Dir*") { Remove-Item $Shortcut -Force }
+        $run = (Get-ItemProperty -Path $RunKey -Name 'FlowClone' -ErrorAction SilentlyContinue).FlowClone
+        if ($run -and $run -like "*$Dir*") { Remove-ItemProperty -Path $RunKey -Name 'FlowClone' -ErrorAction SilentlyContinue }
         Write-Host "FlowClone was uninstalled. Settings and history remain in $env:APPDATA\FlowClone." -ForegroundColor Green
+        if ($ExeInstalled) { Write-Host 'FlowClone.exe is still installed (remove it in Settings > Apps).' }
         return
     }
 
@@ -109,10 +131,10 @@ function Install-FlowClone {
         }
         if (-not (Test-Path (Join-Path $winSrc 'run.py'))) { throw "Could not find windows\run.py in the source ($winSrc)." }
         if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force }
-        Copy-Item $winSrc $AppDir -Recurse
-        Get-ChildItem $AppDir -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
-        $testsDir = Join-Path $AppDir 'tests'
-        if (Test-Path $testsDir) { Remove-Item $testsDir -Recurse -Force }
+        # Skip build output (a local checkout may contain a 150+ MB dist folder) and tests.
+        & robocopy $winSrc $AppDir /E /XD build dist Output __pycache__ tests /XF *.spec /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Copying the app files failed (robocopy exit code $LASTEXITCODE)." }
+        $global:LASTEXITCODE = 0
     } finally {
         Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -139,19 +161,25 @@ function Install-FlowClone {
     # ---------- 4. Shortcut + launch ----------
     $Pythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
     $RunPy = Join-Path $AppDir 'run.py'
-    Write-Step 'Adding a Start-menu shortcut'
-    $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut($Shortcut)
-    $lnk.TargetPath = $Pythonw
-    $lnk.Arguments = "`"$RunPy`""
-    $lnk.WorkingDirectory = $AppDir
-    $lnk.Description = 'FlowClone - local voice dictation'
-    $lnk.Save()
+    $existing = Get-ShortcutTarget $Shortcut
+    if ($ExeInstalled -and $existing -and $existing -like '*FlowClone.exe') {
+        Write-Step 'FlowClone.exe is also installed - keeping its Start-menu shortcut'
+        Write-Host '    Both versions share your settings; run only one of them at a time.'
+    } else {
+        Write-Step 'Adding a Start-menu shortcut'
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk = $shell.CreateShortcut($Shortcut)
+        $lnk.TargetPath = $Pythonw
+        $lnk.Arguments = "`"$RunPy`""
+        $lnk.WorkingDirectory = $AppDir
+        $lnk.Description = 'FlowClone - local voice dictation'
+        $lnk.Save()
+    }
 
     Write-Host ''
     Write-Host 'FlowClone is installed.' -ForegroundColor Green
     Write-Host '  - Hold Ctrl+Win, speak, release: your words are typed into the focused app.'
-    Write-Host '  - The first start downloads the speech model (~330 MB, one time).'
+    Write-Host '  - The first start downloads the speech model (~670 MB, one time).'
     Write-Host '  - Double-click the tray icon for settings; enable "Start with Windows" there.'
     Write-Host '  - Start it later from the Start menu: FlowClone.'
     if ($env:FLOWCLONE_NO_START -ne '1') {

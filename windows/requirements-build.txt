@@ -1,0 +1,47 @@
+# Exact versions used to build FlowClone.exe (Python 3.12, Windows x64).
+# Same packages as requirements.txt minus faster-whisper (not bundled in the exe),
+# plus PyInstaller. Update: make a clean Python 3.12 venv, pip install -r requirements.txt
+# without faster-whisper + pyinstaller, run the build + selftest, then pip freeze here.
+# tests/test_paths_and_engine.py checks that every runtime requirement is listed.
+
+altgraph==0.17.5
+anyio==4.16.0
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.1
+colorama==0.4.6
+filelock==4.2.10
+flatbuffers==25.12.19
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.8.0
+httpcore2==2.16.0
+httpx2==2.16.0
+huggingface-hub==2.4.0
+idna==3.20
+keyboard==0.13.5
+numpy==2.5.4
+onnx-asr[cpu,hub]==0.12.0
+onnxruntime==1.32.0
+packaging==26.3
+pefile==2024.8.26
+pillow==13.0.0
+protobuf==7.36.2
+psutil==7.2.2
+pycparser==3.12
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+pyperclip==1.11.0
+pystray==0.19.5
+pywin32==312
+pywin32-ctypes==0.2.3
+pyyaml==6.0.3
+requests==2.34.2
+setuptools==84.2.1
+six==1.17.0
+sounddevice==0.5.6
+tqdm==4.70.1
+truststore==0.10.5
+typing-extensions==4.16.0
+urllib3==2.8.0
