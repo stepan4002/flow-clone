@@ -14,12 +14,18 @@ object WhisperChunks {
 
     data class Result(val text: String, val lang: String?)
 
-    /** Splits [samples] into consecutive chunks of at most [max] samples (none for empty input). */
+    /**
+     * Splits [samples] into the fewest equal-length chunks of at most [max] samples (none for
+     * empty input). Equal lengths avoid a tiny last chunk, which Whisper tends to fill with
+     * made-up text ("Thank you.").
+     */
     fun split(samples: FloatArray, max: Int = MAX_SAMPLES): List<FloatArray> {
         require(max > 0)
         if (samples.isEmpty()) return emptyList()
-        return (samples.indices step max).map { from ->
-            samples.copyOfRange(from, minOf(from + max, samples.size))
+        val count = (samples.size + max - 1) / max
+        val size = (samples.size + count - 1) / count
+        return (samples.indices step size).map { from ->
+            samples.copyOfRange(from, minOf(from + size, samples.size))
         }
     }
 

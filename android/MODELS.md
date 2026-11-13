@@ -48,7 +48,7 @@ Pick ONE:
 | Model | Download | Size (int8) | Recommendation |
 |---|---|---|---|
 | **whisper-base** (multilingual) | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2 | ~80 MB | Start here. Good quality, works on mid-range phones. |
-| **whisper-small** (multilingual) | Use **Setup → Extra: higher-accuracy model** in the app | ~375 MB | Better quality, 2–3× slower. The app downloads it to `files/model/whisper-small/` and checks every file's SHA-256. |
+| **whisper-small** (multilingual) | Use **Setup → Extra: higher-accuracy model** in the app | ~375 MB | Better quality, 2–3× slower. The app downloads it into its internal storage (not reachable over USB) and checks every file's SHA-256. |
 
 More models: https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html
 
@@ -146,7 +146,7 @@ simply runs without hotwords. Regenerate the vocab with
 ## 4. How FlowKey finds the files
 
 - Whisper: looks in `files/model/whisper/`, then in `files/model/` itself. The downloaded
-  higher-accuracy model lives in `files/model/whisper-small/`; whichever one is selected in
+  higher-accuracy model lives in the app's internal storage; whichever one is selected in
   Setup is preferred, and the other one is the fallback.
 - Zipformer: looks in `files/model/zipformer/`, then in `files/model/` (a `joiner` file is
   what marks a folder as a Zipformer model).

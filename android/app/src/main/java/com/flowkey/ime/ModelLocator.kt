@@ -38,9 +38,13 @@ object ModelLocator {
 
     fun zipformerDir(context: Context): File = File(modelRoot(context), "zipformer")
 
-    /** Downloaded Whisper small (see ModelDownloader); null when external storage is missing. */
+    /**
+     * Downloaded Whisper small (see ModelDownloader). Kept in INTERNAL no-backup storage: on
+     * Android 8-10 other apps with storage permission can write to external app folders, and a
+     * replaced model would be loaded into native code; it is also too big for backups.
+     */
     fun whisperSmallDir(context: Context): File? =
-        context.getExternalFilesDir(null)?.let { File(File(it, "model"), "whisper-small") }
+        File(File(context.noBackupFilesDir, "model"), "whisper-small")
 
     /** Internal (never backed up) copy of assets/hotwords/: the BPE vocab + generated hotwords. */
     fun hotwordsDir(context: Context): File = File(context.filesDir, "hotwords")
@@ -74,8 +78,16 @@ object ModelLocator {
      * The requested Whisper [variant] if present, otherwise the other one: a no-model APK with
      * the downloaded small model works, and so does base after small was deleted.
      */
-    fun locateWhisper(context: Context, variant: String = Prefs.VARIANT_BASE): WhisperModel? {
-        val small = whisperSmallDir(context)?.let { locateWhisperIn(it, Prefs.VARIANT_SMALL) }
+    fun locateWhisper(
+        context: Context,
+        variant: String = Prefs.VARIANT_BASE,
+        smallAllowed: Boolean = true,
+    ): WhisperModel? {
+        val small = if (smallAllowed) {
+            whisperSmallDir(context)?.let { locateWhisperIn(it, Prefs.VARIANT_SMALL) }
+        } else {
+            null
+        }
         val base = locateWhisperBase(context)
         return if (variant == Prefs.VARIANT_SMALL) small ?: base else base ?: small
     }

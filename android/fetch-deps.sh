@@ -23,14 +23,18 @@ else
   echo "==> $aar already present"
 fi
 
+# Pinned: this file is bundled into the signed APK and loaded by native code.
 vad="app/src/main/assets/vad/silero_vad.onnx"
-if [ ! -f "$vad" ]; then
+vad_sha256="9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+if [ -f "$vad" ] && echo "$vad_sha256  $vad" | sha256sum -c --status; then
+  echo "==> $vad already present"
+else
   echo "==> Downloading Silero VAD (live text)"
   mkdir -p "$(dirname "$vad")"
-  curl -fL --retry 3 -o "$vad" \
+  curl -fL --retry 3 -o "$vad.part" \
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
-else
-  echo "==> $vad already present"
+  echo "$vad_sha256  $vad.part" | sha256sum -c --status || { rm -f "$vad.part"; echo "VAD checksum mismatch" >&2; exit 1; }
+  mv "$vad.part" "$vad"
 fi
 
 if [ "${1:-}" = "--model" ]; then

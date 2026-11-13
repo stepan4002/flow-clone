@@ -37,6 +37,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +65,7 @@ class VoiceInputIME : InputMethodService() {
         const val MAX_TAKE_MS = 60_000L           // hard cap per Whisper take (~3.7 MB audio)
         const val VAD_ASSET_NAME = "silero_vad.onnx"
         const val PRE_ROLL_SAMPLES = SAMPLE_RATE / 2L  // audio kept before a detected onset
+        const val VAD_MIN_SILENCE_MS = 1000L           // Silero minSilenceDuration below
         const val HISTORY_SAMPLES = SAMPLE_RATE * 40L  // rolling audio kept for phrase decodes
         const val BACKSPACE_FIRST_DELAY_MS = 400L
         const val BACKSPACE_REPEAT_MS = 50L
@@ -120,6 +122,9 @@ class VoiceInputIME : InputMethodService() {
     /** True while the running session is a live Whisper session. */
     private var liveSession = false
 
+    /** The composing region holds only the "…" placeholder, not dictated text. */
+    private var composingIsPlaceholder = false
+
     /** The text field a session started in; text is never committed into another one. */
     private var sessionField: Pair<String?, Int>? = null
 
@@ -171,10 +176,13 @@ class VoiceInputIME : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
-        if (sessionJob?.isActive == true && liveSession) {
-            // Live session: keep what is already shown in THIS field and drop pending audio,
-            // instead of committing later into whatever field gets focus next.
-            currentInputConnection?.finishComposingText()
+        if (sessionJob?.isCompleted == false && liveSession) {
+            // Live session (recording or still finishing): keep what is already shown in THIS
+            // field and drop pending audio, instead of committing later into whatever field
+            // gets focus next. A bare "…" placeholder is removed, never kept.
+            val ic = currentInputConnection
+            if (composingIsPlaceholder) ic?.commitText("", 1) else ic?.finishComposingText()
+            composingIsPlaceholder = false
             stopDictation(commitPending = false)
         } else {
             stopDictation(commitPending = true)
@@ -207,8 +215,19 @@ class VoiceInputIME : InputMethodService() {
             showActionableStatus(getString(R.string.status_no_permission))
             return
         }
-        when (val s = RecognizerManager.state.value) {
-            is RecognizerManager.State.Ready -> startDictation(s.engine)
+        if (sessionJob?.isCompleted == false) {
+            // The previous (cancelled) session is still inside a decode; never run two at once.
+            setStatus(getString(R.string.status_transcribing))
+            return
+        }
+        when (RecognizerManager.state.value) {
+            is RecognizerManager.State.Ready -> {
+                // Count the session BEFORE taking the engine, so a reload finishing right now
+                // can't free it; then take the newest one.
+                RecognizerManager.sessionStarted()
+                val engine = (RecognizerManager.state.value as? RecognizerManager.State.Ready)?.engine
+                if (engine == null || !startDictation(engine)) RecognizerManager.sessionEnded(this)
+            }
             is RecognizerManager.State.Loading,
             RecognizerManager.State.NotLoaded -> {
                 setStatus(getString(R.string.status_loading))
@@ -216,8 +235,12 @@ class VoiceInputIME : InputMethodService() {
             }
             is RecognizerManager.State.ModelMissing ->
                 showActionableStatus(getString(R.string.status_no_model))
-            is RecognizerManager.State.Error ->
-                showActionableStatus(getString(R.string.status_engine_error, s.message))
+            is RecognizerManager.State.Error -> showActionableStatus(
+                getString(
+                    R.string.status_engine_error,
+                    (RecognizerManager.state.value as? RecognizerManager.State.Error)?.message.orEmpty(),
+                )
+            )
         }
     }
 
@@ -306,8 +329,9 @@ class VoiceInputIME : InputMethodService() {
 
     // ------------------------------------------------------------- dictation
 
-    private fun startDictation(engine: RecognizerManager.Engine) {
-        if (recording || sessionJob?.isActive == true) return
+    /** Starts a session; returns false if none was started. Caller did sessionStarted(). */
+    private fun startDictation(engine: RecognizerManager.Engine): Boolean {
+        if (recording || sessionJob?.isCompleted == false) return false
 
         val before = currentInputConnection?.getTextBeforeCursor(16, 0)?.toString().orEmpty()
         val trimmed = before.trimEnd(' ')
@@ -331,12 +355,12 @@ class VoiceInputIME : InputMethodService() {
         val record = createAudioRecord()
         if (record == null) {
             setStatus(getString(R.string.status_audio_error))
-            return
+            return false
         }
 
         recording = true
         commitOnStop = true
-        RecognizerManager.sessionActive = true
+        transcribing = false
         setRecordingUi(true)
         playCue(start = true)
         record.startRecording()
@@ -352,15 +376,30 @@ class VoiceInputIME : InputMethodService() {
                 launchStreamingSession(record, engine.recognizer)
             }
         }.also { job ->
-            job.invokeOnCompletion { RecognizerManager.sessionActive = false }
+            val appContext = applicationContext
+            job.invokeOnCompletion { RecognizerManager.sessionEnded(appContext) }
         }
+        return true
     }
 
     private fun stopDictation(commitPending: Boolean) {
-        commitOnStop = commitPending
+        if (!commitPending) {
+            // Drop the session, also one that is still finishing after a stop tap.
+            commitOnStop = false
+            recording = false
+            sessionJob?.cancel()
+            return
+        }
         if (!recording) return
+        commitOnStop = true
         recording = false
-        if (!commitPending) sessionJob?.cancel()
+        if (liveSession) {
+            // Block Enter/Space/Backspace/language right away: the live session may need a
+            // few seconds to finish its current decode before it notices the stop.
+            transcribing = true
+            setRecordingUi(false)
+            setStatus(getString(R.string.status_transcribing))
+        }
         // UI teardown and the final commit happen in the session coroutine.
     }
 
@@ -498,7 +537,7 @@ class VoiceInputIME : InputMethodService() {
                 model = "vad/$VAD_ASSET_NAME",
                 threshold = 0.5f,
                 // A full second of silence ends a phrase, so phrases follow sentence pauses.
-                minSilenceDuration = 1.0f,
+                minSilenceDuration = VAD_MIN_SILENCE_MS / 1000f,
                 minSpeechDuration = 0.25f,
                 windowSize = 512,
                 // Not a hard cut (sherpa only tightens thresholds); decodes are chunked anyway.
@@ -524,6 +563,7 @@ class VoiceInputIME : InputMethodService() {
         mainScope.launch(Dispatchers.Default) {
             val opts = options
             val audio = Channel<FloatArray>(Channel.UNLIMITED)
+            val queued = AtomicInteger(0) // chunks recorded but not processed yet
             val producer = launch(Dispatchers.IO) {
                 val buffer = ShortArray(CHUNK)
                 try {
@@ -534,6 +574,7 @@ class VoiceInputIME : InputMethodService() {
                             break
                         }
                         if (n == 0) continue
+                        queued.incrementAndGet()
                         audio.send(FloatArray(n) { buffer[it] / 32768.0f })
                     }
                 } finally {
@@ -554,6 +595,7 @@ class VoiceInputIME : InputMethodService() {
                 recording = false
                 producer.cancel()
                 withContext(NonCancellable + Dispatchers.Main) {
+                    transcribing = false
                     setRecordingUi(false)
                     clearPlaceholder()
                     setStatus(getString(R.string.status_engine_error, t.message ?: "VAD"))
@@ -568,13 +610,32 @@ class VoiceInputIME : InputMethodService() {
             var heardVoice = false
             var autoStopped = false
             var stopHandled = false
+            var finished = false         // the normal or error path ran its own UI teardown
             var sinceVoice = 0L
             var sinceLastPartial = 0L
             var lastDecodeMs = 0L
+            // Silero keeps "speech detected" on for its min-silence window after speech ends,
+            // so silence counted from there is already that much late.
+            val autoStopMs = (opts.autoStopMs - VAD_MIN_SILENCE_MS).coerceAtLeast(300L)
 
             /** Audio of a phrase, padded in front: Silero reports speech onsets ~0.5 s late. */
             fun phraseAudio(from: Long, to: Long): FloatArray =
                 history.slice(maxOf(from - PRE_ROLL_SAMPLES, lastPhraseEnd), to)
+
+            fun appendPhrase(text: String) {
+                if (text.isBlank()) return
+                // The break marks a phrase end for end-only commands ("Punkt" + pause).
+                if (sessionRaw.isNotEmpty()) sessionRaw.append(' ').append(TextCleanup.PHRASE_BREAK).append(' ')
+                sessionRaw.append(text)
+            }
+
+            /** Cleans off the main thread, then shows the result there. */
+            suspend fun render(partial: String) {
+                val raw = listOf(sessionRaw.toString(), partial).filter { it.isNotBlank() }
+                    .joinToString(" " + TextCleanup.PHRASE_BREAK + " ")
+                val shown = if (raw.isBlank()) "" else clean(raw, null)
+                withContext(Dispatchers.Main) { showLive(shown, partial) }
+            }
 
             suspend fun finishPhrases() {
                 while (!vad.empty()) {
@@ -585,19 +646,20 @@ class VoiceInputIME : InputMethodService() {
                     val result = WhisperChunks.decodeAll(recognizer, phraseAudio(segStart, segEnd))
                     lastPhraseEnd = maxOf(lastPhraseEnd, segEnd)
                     onset = null
+                    appendPhrase(result.text)
                     if (result.text.isNotBlank()) {
-                        if (sessionRaw.isNotEmpty()) sessionRaw.append(' ')
-                        sessionRaw.append(result.text)
+                        // Fix the auto-mode language from real speech only, never from noise.
+                        withContext(Dispatchers.Main) { commandLanguage(result.lang) }
                     }
-                    withContext(Dispatchers.Main) {
-                        commandLanguage(result.lang) // fixes the auto-mode language once known
-                        if (sessionRaw.length >= LivePolicy.MAX_COMPOSING_CHARS) {
-                            commitSegment(sessionRaw.toString())
-                            sessionRaw.setLength(0)
+                    if (sessionRaw.length >= LivePolicy.MAX_COMPOSING_CHARS) {
+                        val text = sessionRaw.toString()
+                        sessionRaw.setLength(0)
+                        withContext(Dispatchers.Main) {
+                            commitSegment(text)
                             showPlaceholder()
-                        } else {
-                            renderLive(sessionRaw, "")
                         }
+                    } else {
+                        render("")
                     }
                 }
             }
@@ -605,6 +667,7 @@ class VoiceInputIME : InputMethodService() {
             try {
                 withContext(Dispatchers.Main) { showPlaceholder() }
                 for (chunk in audio) {
+                    queued.decrementAndGet()
                     history.add(chunk)
                     vad.acceptWaveform(chunk)
                     sinceVoice += chunk.size
@@ -616,9 +679,10 @@ class VoiceInputIME : InputMethodService() {
                         if (onset == null) onset = history.end - chunk.size
                     }
 
-                    // Partials only while still listening; after stop, finish quickly.
+                    // Partials only while listening AND caught up with the microphone: when
+                    // decoding falls behind, finishing phrases matters more than previews.
                     val phraseStart = onset
-                    if (recording && phraseStart != null &&
+                    if (recording && queued.get() == 0 && phraseStart != null &&
                         LivePolicy.ms(history.end - phraseStart) >= LivePolicy.MIN_PARTIAL_SPEECH_MS &&
                         LivePolicy.partialDue(sinceLastPartial, lastDecodeMs)
                     ) {
@@ -627,14 +691,14 @@ class VoiceInputIME : InputMethodService() {
                         val partial = WhisperChunks.decodeAll(recognizer, phraseAudio(from, history.end)).text
                         lastDecodeMs = SystemClock.elapsedRealtime() - t0
                         sinceLastPartial = 0
-                        withContext(Dispatchers.Main) { renderLive(sessionRaw, partial) }
+                        render(partial)
                     }
 
                     finishPhrases()
 
                     if (recording) {
                         val stop = (opts.autoStop &&
-                            (LivePolicy.autoStop(heardVoice, sinceVoice, opts.autoStopMs) ||
+                            (LivePolicy.autoStop(heardVoice, sinceVoice, autoStopMs) ||
                                 LivePolicy.noSpeech(heardVoice, history.end))) ||
                             LivePolicy.maxTake(history.end)
                         if (stop) {
@@ -660,20 +724,14 @@ class VoiceInputIME : InputMethodService() {
                 if (pending != null &&
                     LivePolicy.ms(history.end - pending) >= LivePolicy.MIN_PARTIAL_SPEECH_MS
                 ) {
-                    val text = WhisperChunks.decodeAll(recognizer, phraseAudio(pending, history.end)).text
-                    if (text.isNotBlank()) {
-                        if (sessionRaw.isNotEmpty()) sessionRaw.append(' ')
-                        sessionRaw.append(text)
-                    }
+                    appendPhrase(WhisperChunks.decodeAll(recognizer, phraseAudio(pending, history.end)).text)
                 }
 
                 val shouldCommit = commitOnStop
                 withContext(NonCancellable + Dispatchers.Main) {
-                    if (!stopHandled) {
-                        // The microphone ended on its own (read error): stop like a tap would.
-                        recording = false
-                        setRecordingUi(false)
-                    }
+                    finished = true
+                    recording = false
+                    setRecordingUi(false)
                     transcribing = false
                     when {
                         shouldCommit && sessionRaw.isNotBlank() -> {
@@ -695,6 +753,7 @@ class VoiceInputIME : InputMethodService() {
                 Log.e(TAG, "Live transcription failed", t)
                 recording = false
                 withContext(NonCancellable + Dispatchers.Main) {
+                    finished = true
                     transcribing = false
                     setRecordingUi(false)
                     clearPlaceholder()
@@ -703,27 +762,34 @@ class VoiceInputIME : InputMethodService() {
             } finally {
                 producer.cancel()
                 vad.release()
-                withContext(NonCancellable + Dispatchers.Main) {
-                    if (transcribing || recording) {
-                        // Cancelled (field closed, keyboard destroyed): reset the UI.
+                if (!finished) {
+                    // Cancelled (field closed, keyboard destroyed). No other session can have
+                    // started meanwhile (startDictation waits for this job), so reset it all.
+                    withContext(NonCancellable + Dispatchers.Main) {
                         recording = false
                         transcribing = false
                         setRecordingUi(false)
                         refreshIdleStatus()
+                        // What was shown stays in the old field; keep the take in history too.
+                        val text = sessionRaw.toString()
+                        if (text.isNotBlank()) {
+                            val cleaned = clean(text, null)
+                            if (cleaned.isNotEmpty()) HistoryStore.add(this@VoiceInputIME, cleaned)
+                        }
                     }
                 }
             }
         }
 
-    /** Shows the whole live session (cleaned) plus the current partial as composing text. */
-    private fun renderLive(sessionRaw: CharSequence, partial: String) {
+    /** Shows the cleaned live session (already computed off the main thread). */
+    private fun showLive(shown: String, partial: String) {
         if (!inSessionField()) return
         val ic = currentInputConnection ?: return
-        val raw = listOf(sessionRaw.toString(), partial).filter { it.isNotBlank() }.joinToString(" ")
-        val shown = if (raw.isBlank()) "" else clean(raw, null)
         val prefix = if (needLeadingSpace) " " else ""
+        composingIsPlaceholder = shown.isEmpty()
         ic.setComposingText(prefix + shown.ifEmpty { "…" }, 1)
-        setStatus(partial.ifBlank { getString(R.string.status_listening_tap) })
+        // After stop the status says "Transcribing…" until the end; don't flip it back.
+        if (recording) setStatus(partial.ifBlank { getString(R.string.status_listening_tap) })
     }
 
     /** Optional engine: streaming partials + endpoint-based hands-free segments. */
@@ -788,12 +854,14 @@ class VoiceInputIME : InputMethodService() {
     // ------------------------------------------------------------- text I/O
 
     private fun showPlaceholder() {
+        composingIsPlaceholder = true
         val ic = currentInputConnection ?: return
         val prefix = if (needLeadingSpace) " " else ""
         ic.setComposingText(prefix + "…", 1)
     }
 
     private fun clearPlaceholder() {
+        composingIsPlaceholder = false
         // Committing "" atomically removes the composing region.
         currentInputConnection?.commitText("", 1)
     }
@@ -835,6 +903,7 @@ class VoiceInputIME : InputMethodService() {
     }
 
     private fun commitSegment(raw: String, detectedLang: String? = null) {
+        composingIsPlaceholder = false
         val cleaned = clean(raw, detectedLang)
         val ic = currentInputConnection
         if (ic == null || !inSessionField()) {
@@ -909,6 +978,7 @@ class VoiceInputIME : InputMethodService() {
     private fun setRecordingUi(active: Boolean) {
         val button = micButton ?: return
         if (active) {
+            pulse?.cancel() // never leave an old animator running
             button.setBackgroundResource(R.drawable.bg_mic_recording)
             pulse = ObjectAnimator.ofPropertyValuesHolder(
                 button,

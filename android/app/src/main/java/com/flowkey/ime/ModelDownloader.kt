@@ -3,7 +3,9 @@ package com.flowkey.ime
 import android.content.Context
 import android.os.StatFs
 import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -48,6 +50,7 @@ object ModelDownloader {
 
     sealed class DlState {
         data object Idle : DlState()
+        data object Removed : DlState()
         data class Running(val done: Long, val total: Long) : DlState()
         data object Verifying : DlState()
         data object Done : DlState()
@@ -59,7 +62,14 @@ object ModelDownloader {
     private val _state = MutableStateFlow<DlState>(DlState.Idle)
     val state: StateFlow<DlState> = _state
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Last line of defence: an unexpected error fails the download instead of the process
+    // (the keyboard lives in the same process).
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, t ->
+            Log.e(TAG, "Download crashed", t)
+            _state.value = DlState.Failed(Reason.STORAGE, t.javaClass.simpleName)
+        }
+    )
     private var job: Job? = null
 
     /** All files present with the expected size. Hashes were checked before each rename. */
@@ -75,29 +85,44 @@ object ModelDownloader {
             (WHISPER_SMALL.any { File(dir, it.name).isFile } && !isInstalled(context))
     }
 
+    /**
+     * Starts (or resumes) the download. A previous run that was cancelled may still be blocked
+     * in a read or a hash for a while; the new run waits for it to end first, so two runs never
+     * touch the same `.part` file.
+     */
     @Synchronized
     fun start(context: Context) {
-        if (job?.isActive == true) return // a second tap must not append to the same .part
+        val previous = job
+        if (previous?.isActive == true) return // already running (or queued behind a cancel)
         val appContext = context.applicationContext
-        job = scope.launch { run(appContext) }
+        job = scope.launch {
+            previous?.cancelAndJoin()
+            run(appContext)
+        }
     }
 
     /** Stops the download; `.part` files are kept so the next start resumes. */
     @Synchronized
     fun cancel() {
-        job?.cancel()
-        job = null
+        job?.cancel() // the reference stays, so start() can wait for it to really end
         _state.value = DlState.Idle
     }
 
     /** Removes the model. If it was in use, FlowKey switches back to Whisper base. */
+    @Synchronized
     fun delete(context: Context) {
-        cancel()
-        ModelLocator.whisperSmallDir(context)?.deleteRecursively()
-        if (Prefs.getWhisperVariant(context) == Prefs.VARIANT_SMALL) {
-            Prefs.setWhisperVariant(context, Prefs.VARIANT_BASE)
+        val previous = job
+        previous?.cancel()
+        val appContext = context.applicationContext
+        job = scope.launch {
+            previous?.join()
+            ModelLocator.whisperSmallDir(appContext)?.deleteRecursively()
+            if (Prefs.getWhisperVariant(appContext) == Prefs.VARIANT_SMALL) {
+                Prefs.setWhisperVariant(appContext, Prefs.VARIANT_BASE)
+            }
+            _state.value = DlState.Removed // a distinct value, so Setup re-renders
+            RecognizerManager.initialize(appContext, force = true)
         }
-        RecognizerManager.initialize(context, force = true)
     }
 
     private suspend fun run(context: Context) {
@@ -143,12 +168,20 @@ object ModelDownloader {
                 return
             }
             _state.value = DlState.Verifying
-            if (!sha256(part).equals(file.sha256, ignoreCase = true)) {
+            val hash = try {
+                sha256(part)
+            } catch (e: IOException) {
+                Log.w(TAG, "Could not read ${part.name} to verify it", e)
+                _state.value = DlState.Failed(Reason.STORAGE)
+                return
+            }
+            if (!hash.equals(file.sha256, ignoreCase = true)) {
                 Log.w(TAG, "Checksum mismatch for ${file.name}; deleting")
                 part.delete()
                 _state.value = DlState.Failed(Reason.CHECKSUM, file.name)
                 return
             }
+            coroutineContext.ensureActive() // cancelled while hashing: leave the .part as is
             if (out.exists()) out.delete()
             if (!part.renameTo(out)) {
                 _state.value = DlState.Failed(Reason.STORAGE)
@@ -172,12 +205,15 @@ object ModelDownloader {
 
     /** Downloads (or resumes) [file] into [part]. Returns the new overall byte count. */
     private suspend fun fetch(file: RemoteFile, part: File, doneBefore: Long): Long {
+        var doneBase = doneBefore
         var partLen = if (part.isFile) part.length() else 0L
         when (DownloadDecision.beforeRequest(partLen, file.size)) {
             DownloadDecision.Before.VERIFY -> return doneBefore + (file.size - partLen)
             DownloadDecision.Before.DISCARD -> {
                 part.delete()
                 partLen = 0
+                // run() counted min(part, size) bytes as done; they are gone now.
+                doneBase -= file.size
             }
             DownloadDecision.Before.REQUEST -> Unit
         }
@@ -194,16 +230,17 @@ object ModelDownloader {
             val append = when (DownloadDecision.onResponse(code, partLen, rangeStart)) {
                 DownloadDecision.After.APPEND -> true
                 DownloadDecision.After.TRUNCATE -> {
+                    doneBase -= partLen // those bytes are being thrown away
                     partLen = 0
                     false
                 }
-                DownloadDecision.After.VERIFY -> return doneBefore + (file.size - partLen)
+                DownloadDecision.After.VERIFY -> return doneBase + (file.size - partLen)
                 DownloadDecision.After.FAIL -> {
                     if (code == 206) part.delete() // wrong offset: start clean next time
                     throw IOException("HTTP $code")
                 }
             }
-            var done = doneBefore
+            var done = doneBase
             var lastEmit = 0L
             conn.inputStream.use { input ->
                 FileOutputStream(part, append).use { output ->
@@ -259,11 +296,16 @@ object DownloadDecision {
     }
 
     /**
-     * 206 must continue exactly where the `.part` file ends; 200 means the server ignored Range
-     * (start over); 416 means there is nothing more to send (verify what we have).
+     * 206 must continue exactly where the `.part` file ends (or start at byte 0); any other
+     * offset fails and the `.part` is dropped. 200 means the server ignored Range (start over);
+     * 416 means there is nothing more to send (verify what we have).
      */
     fun onResponse(code: Int, partLen: Long, contentRangeStart: Long?): After = when (code) {
-        206 -> if (partLen > 0 && contentRangeStart == partLen) After.APPEND else After.TRUNCATE
+        206 -> when {
+            partLen > 0 && contentRangeStart == partLen -> After.APPEND
+            contentRangeStart == 0L -> After.TRUNCATE // the whole file, from byte 0
+            else -> After.FAIL                        // some other offset: never write it at 0
+        }
         200 -> After.TRUNCATE
         416 -> if (partLen > 0) After.VERIFY else After.FAIL
         else -> After.FAIL

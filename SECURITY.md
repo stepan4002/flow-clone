@@ -5,8 +5,10 @@
 - **Android (FlowKey):** speech is recognized entirely on the phone and audio never leaves
   it. Since v1.2 the app has the `INTERNET` permission for exactly one feature: the optional
   higher-accuracy model, downloaded only when you tap Download in Setup. That code
-  (`ModelDownloader.kt`) fetches fixed HTTPS URLs on huggingface.co and rejects any file whose
-  SHA-256 does not match the pinned hash. Nothing else in the app opens a connection.
+  (`ModelDownloader.kt`) fetches fixed HTTPS URLs on huggingface.co (which redirect to
+  Hugging Face's download servers) and rejects any file whose SHA-256 does not match the
+  pinned hash. The model is stored in the app's internal storage, out of reach of other apps.
+  Nothing else in the app opens a connection.
 - **Android releases** are signed with a dedicated release key (APK Signature Scheme v3, with
   key rotation from the debug key that signed v1.0–v1.1). Debug builds are a separate app
   (`com.flowkey.ime.debug`).

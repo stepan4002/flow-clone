@@ -9,8 +9,9 @@ script. It has no dependencies: it reads the SentencePiece protobuf directly.
 Usage:
     python tools/export_bpe_vocab.py path/to/bpe.model out/bpe.vocab
 
-``fetch-deps.sh --model`` keeps ``bpe.model`` in its temp dir; regenerating is only needed if
-you replace the bundled streaming model with another BPE model.
+``bpe.model`` is in the model's tarball
+(sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2; ``fetch-deps.sh`` does not keep it).
+Regenerating is only needed if you replace the bundled streaming model with another BPE model.
 """
 import struct
 import sys

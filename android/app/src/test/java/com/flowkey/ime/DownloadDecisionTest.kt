@@ -18,7 +18,8 @@ class DownloadDecisionTest {
     @Test fun `resume only when the server continues exactly at the part length`() {
         assertEquals(After.APPEND, DownloadDecision.onResponse(206, 40, 40))
         assertEquals(After.TRUNCATE, DownloadDecision.onResponse(206, 40, 0))
-        assertEquals(After.TRUNCATE, DownloadDecision.onResponse(206, 40, null))
+        assertEquals(After.FAIL, DownloadDecision.onResponse(206, 40, null))
+        assertEquals(After.FAIL, DownloadDecision.onResponse(206, 40, 10))
         assertEquals(After.TRUNCATE, DownloadDecision.onResponse(200, 40, null))
         assertEquals(After.TRUNCATE, DownloadDecision.onResponse(200, 0, null))
     }

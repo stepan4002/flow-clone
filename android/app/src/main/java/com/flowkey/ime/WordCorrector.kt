@@ -8,6 +8,9 @@ import java.text.Normalizer
  *  - exact matches (ignoring case and accents) get the user's spelling: "github" -> "GitHub";
  *  - optionally, close misspellings of longer terms are corrected: "Kubernetis" -> "Kubernetes".
  *
+ * What it must NOT do: force capitals onto ordinary words ("it" is not "IT", "may" is not
+ * "May"), or "fix" grammatical forms ("Microsoftu", "pipelines", "Kubernetes's").
+ *
  * Whisper in sherpa-onnx cannot be prompted with a vocabulary, so this post-correction is the
  * Whisper side of "better recognition of your own words". It is deliberately conservative:
  * only terms of [FUZZY_MIN_LENGTH]+ letters are fuzzy-matched, the first letter must agree,
@@ -15,14 +18,27 @@ import java.text.Normalizer
  */
 internal object WordCorrector {
 
+    /**
+     * Languages where close-misspelling fixes are safe. Languages with case endings (Czech,
+     * Slovak, Polish, ...) change the end of names and nouns all the time ("Kateřino",
+     * "Kateřinu"), which a 1-2 edit match cannot tell apart from a misspelling.
+     */
+    val FUZZY_LANGUAGES = setOf("en", "fr", "es", "it", "pt", "nl", "de")
+
     const val FUZZY_MIN_LENGTH = 6
     const val FUZZY_TWO_EDITS_LENGTH = 9
     private const val MAX_TERM_TOKENS = 6
 
     private val TOKEN = Regex("[\\p{L}\\p{N}][\\p{L}\\p{N}'’-]*")
     private val WHITESPACE = Regex("\\s+")
+    private val MARKS = Regex("\\p{Mn}+")
 
-    private class Term(val text: String, val norm: List<String>) {
+    /**
+     * @param caseOnly whether a match that differs ONLY in letter case may be rewritten. Off
+     *   for short all-caps terms ("IT", "US") and single capitalized words ("May", "Mark"),
+     *   which collide with ordinary words. Accent fixes ("dvorak" -> "Dvořák") still apply.
+     */
+    private class Term(val text: String, val norm: List<String>, val caseOnly: Boolean) {
         val joined = norm.joinToString("")
     }
 
@@ -37,7 +53,12 @@ internal object WordCorrector {
             if (!plain || parts.isEmpty() || parts.size > MAX_TERM_TOKENS) {
                 null
             } else {
-                Term(parts.joinToString(" "), parts.map { normalize(it) })
+                val letters = parts.sumOf { p -> p.count { it.isLetterOrDigit() } }
+                val allCaps = parts.all { p -> p == p.uppercase() }
+                val capitalizedWord = parts.size == 1 && parts[0].first().isUpperCase() &&
+                    parts[0].drop(1) == parts[0].drop(1).lowercase()
+                val caseOnly = letters > 2 && !(allCaps && letters <= 3) && !capitalizedWord
+                Term(parts.joinToString(" "), parts.map { normalize(it) }, caseOnly)
             }
         }
             // Longer terms first, so "Flow Clone" wins over "Flow".
@@ -49,14 +70,20 @@ internal object WordCorrector {
         var copiedUpTo = 0
         var i = 0
         while (i < tokens.size) {
-            val hit = prepared.firstOrNull { exactAt(text, tokens, i, it) }
-                ?: if (fuzzy) prepared.firstOrNull { fuzzyAt(text, tokens, i, it) } else null
+            val exact = prepared.firstOrNull { exactAt(text, tokens, i, it) }
+            val hit = exact ?: if (fuzzy) prepared.firstOrNull { fuzzyAt(text, tokens, i, it) } else null
             if (hit == null) {
                 i++
                 continue
             }
             val first = tokens[i]
             val last = tokens[i + hit.norm.size - 1]
+            val found = text.substring(first.start, last.end)
+            val caseOnlyDiff = found.split(WHITESPACE).joinToString(" ").equals(hit.text, ignoreCase = true)
+            if (exact != null && caseOnlyDiff && !hit.caseOnly) {
+                i += hit.norm.size // an ordinary word that merely looks like the term: keep it
+                continue
+            }
             out.append(text, copiedUpTo, first.start).append(hit.text)
             copiedUpTo = last.end
             i += hit.norm.size
@@ -70,7 +97,8 @@ internal object WordCorrector {
         if (i + k > tokens.size) return null
         val w = tokens.subList(i, i + k)
         for (j in 1 until w.size) {
-            if (text.substring(w[j - 1].end, w[j].start).isNotBlank()) return null
+            val gap = text.substring(w[j - 1].end, w[j].start)
+            if (gap.isNotBlank() || gap.contains('\n')) return null // never merge across lines
         }
         return w
     }
@@ -85,13 +113,15 @@ internal object WordCorrector {
         val w = window(text, tokens, i, term.norm.size) ?: return false
         val candidate = w.joinToString("") { it.norm }
         if (candidate.firstOrNull() != term.joined.first()) return false
+        // The term plus an ending is a grammatical form, not a misspelling ("pipelines").
+        if (candidate.startsWith(term.joined)) return false
         val maxEdits = if (term.joined.length >= FUZZY_TWO_EDITS_LENGTH) 2 else 1
         return levenshtein(candidate, term.joined, maxEdits) <= maxEdits
     }
 
     private fun normalize(token: String): String =
         Normalizer.normalize(token.lowercase().replace('’', '\''), Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
+            .replace(MARKS, "")
 
     /** Edit distance, giving up early (returning limit + 1) once it exceeds [limit]. */
     internal fun levenshtein(a: String, b: String, limit: Int): Int {

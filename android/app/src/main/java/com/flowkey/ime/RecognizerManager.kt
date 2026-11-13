@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -57,10 +60,33 @@ object RecognizerManager {
     private var loadedLanguage: String? = null
 
     /**
-     * Set by the keyboard while a dictation session holds the engine. A replaced engine is
-     * released right away only when no session can still be using it.
+     * Dictation sessions that may still use the engine (a cancelled session can still be inside
+     * a native decode). A replaced engine is released right away only when this is zero, and
+     * Whisper's language is only switched (setConfig) while no session decodes.
      */
-    @Volatile var sessionActive = false
+    private val activeSessions = AtomicInteger(0)
+
+    val sessionActive: Boolean get() = activeSessions.get() > 0
+
+    /** Call BEFORE reading the engine from [state] for a new dictation session. */
+    fun sessionStarted() {
+        activeSessions.incrementAndGet()
+    }
+
+    /** Call exactly once per [sessionStarted], when that session has fully finished. */
+    fun sessionEnded(context: Context) {
+        if (activeSessions.decrementAndGet() <= 0) {
+            activeSessions.set(0)
+            if (languageDirty) applyLanguage(context)
+        }
+    }
+
+    /** A language change arrived while a session was decoding; apply it when it ends. */
+    @Volatile private var languageDirty = false
+    private val languageMutex = Mutex()
+
+    /** Crash flags describe the PREVIOUS process, so they are read once, before any load. */
+    @Volatile private var crashFlagsChecked = false
 
     /** The engine currently published as Ready (state is Loading while it is replaced). */
     @Volatile private var lastEngine: Engine? = null
@@ -75,16 +101,11 @@ object RecognizerManager {
     @Synchronized
     fun initialize(context: Context, force: Boolean = false) {
         val appContext = context.applicationContext
-        // Checked first: a crash with hotwords sets both flags, and only hotwords are to blame.
-        if (Prefs.isHotwordsLoadPending(appContext)) {
-            Log.e(TAG, "Previous streaming load with hotwords crashed; disabling hotwords")
-            Prefs.disableHotwordsAfterCrash(appContext)
-            Prefs.setStreamingLoadPending(appContext, false)
-        }
-        if (Prefs.isStreamingLoadPending(appContext)) {
-            // The last streaming load never finished: native code killed the process.
-            Log.e(TAG, "Previous streaming model load crashed; falling back to Whisper")
-            Prefs.disableStreamingAfterCrash(appContext)
+        if (!crashFlagsChecked) {
+            // Once per process: while THIS process loads, the flags are legitimately set, and
+            // reading them again then would mistake a load in progress for a crash.
+            crashFlagsChecked = true
+            checkPreviousCrash(appContext)
         }
         val wantStreaming = Prefs.isStreamingMode(appContext)
         val wantVariant = Prefs.getWhisperVariant(appContext)
@@ -95,9 +116,11 @@ object RecognizerManager {
                 return
             }
             is State.Ready -> {
+                // Compare with the variant a load would pick NOW (wanted, else the fallback),
+                // so a fallback engine isn't reloaded on every keyboard open.
                 val variantOk = wantStreaming ||
-                    (current.engine as? Engine.Whisper)?.variant == wantVariant ||
-                    !ModelDownloader.isInstalled(appContext) // small wanted but missing: keep base
+                    (current.engine as? Engine.Whisper)?.variant ==
+                    ModelLocator.locateWhisper(appContext, wantVariant, smallAllowed(appContext))?.variant
                 if (loadedStreamingMode == wantStreaming && variantOk && !force) {
                     if (!wantStreaming) applyLanguage(appContext)
                     return
@@ -112,23 +135,58 @@ object RecognizerManager {
         scope.launch { load(appContext, wantStreaming) }
     }
 
-    /** Applies the persisted language to a loaded Whisper engine (no model reload). */
+    /**
+     * Applies the persisted language to a loaded Whisper engine (no model reload). Changes are
+     * applied one at a time with the LATEST preference (rapid taps can't land out of order),
+     * and never while a session decodes: sherpa's setConfig is not safe during decode().
+     */
     fun applyLanguage(context: Context) {
         val appContext = context.applicationContext
-        val ready = _state.value as? State.Ready ?: return
-        val engine = ready.engine as? Engine.Whisper ?: return
-        val lang = Prefs.whisperLanguage(appContext)
-        if (lang == loadedLanguage) return
-        val files = whisperFiles ?: return
+        if (sessionActive) {
+            languageDirty = true
+            return
+        }
         scope.launch {
-            try {
-                engine.recognizer.setConfig(whisperConfig(files, lang))
-                loadedLanguage = lang
-            } catch (t: Throwable) {
-                Log.w(TAG, "setConfig failed; rebuilding recognizer for language '$lang'", t)
-                // Fallback: rebuild the recognizer with the new language baked in.
-                initialize(appContext, force = true)
+            languageMutex.withLock {
+                if (sessionActive) {
+                    languageDirty = true
+                    return@withLock
+                }
+                languageDirty = false
+                val engine = (_state.value as? State.Ready)?.engine as? Engine.Whisper ?: return@withLock
+                val files = whisperFiles ?: return@withLock
+                val lang = Prefs.whisperLanguage(appContext)
+                if (lang == loadedLanguage) return@withLock
+                try {
+                    engine.recognizer.setConfig(whisperConfig(files, lang))
+                    loadedLanguage = lang
+                } catch (t: Throwable) {
+                    Log.w(TAG, "setConfig failed; rebuilding recognizer for language '$lang'", t)
+                    // Fallback: rebuild the recognizer with the new language baked in.
+                    initialize(appContext, force = true)
+                }
             }
+        }
+    }
+
+    private fun smallAllowed(context: Context) = !Prefs.isWhisperSmallBlocked(context)
+
+    /** The crash guards: a load that never finished means native code killed the process. */
+    private fun checkPreviousCrash(context: Context) {
+        // Hotwords first: a crash with hotwords sets both flags, and only hotwords are to blame.
+        if (Prefs.isHotwordsLoadPending(context)) {
+            Log.e(TAG, "Previous streaming load with hotwords crashed; disabling hotwords")
+            Prefs.disableHotwordsAfterCrash(context)
+            Prefs.setStreamingLoadPending(context, false)
+        }
+        if (Prefs.isStreamingLoadPending(context)) {
+            Log.e(TAG, "Previous streaming model load crashed; falling back to Whisper")
+            Prefs.disableStreamingAfterCrash(context)
+        }
+        if (Prefs.isWhisperSmallLoadPending(context)) {
+            // Usually out of memory: Whisper small needs ~400 MB on top of the keyboard.
+            Log.e(TAG, "Previous Whisper small load crashed; blocking it and using base")
+            Prefs.blockWhisperSmallAfterCrash(context)
         }
     }
 
@@ -189,14 +247,20 @@ object RecognizerManager {
     }
 
     private fun loadWhisper(context: Context) {
-        val model = ModelLocator.locateWhisper(context, Prefs.getWhisperVariant(context))
+        val model = ModelLocator.locateWhisper(context, Prefs.getWhisperVariant(context), smallAllowed(context))
         if (model == null) {
             _state.value = State.ModelMissing(ModelLocator.whisperDir(context).absolutePath, false)
             return
         }
         whisperFiles = model
         val lang = Prefs.whisperLanguage(context)
-        val recognizer = OfflineRecognizer(config = whisperConfig(model, lang))
+        val small = model.variant == Prefs.VARIANT_SMALL
+        if (small) Prefs.setWhisperSmallLoadPending(context, true)
+        val recognizer = try {
+            OfflineRecognizer(config = whisperConfig(model, lang))
+        } finally {
+            if (small) Prefs.setWhisperSmallLoadPending(context, false)
+        }
         val previous = lastEngine
         loadedStreamingMode = false
         loadedLanguage = lang

@@ -83,6 +83,13 @@ class SetupActivity : AppCompatActivity() {
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
         }
+        if (Prefs.consumeWhisperSmallCrashNotice(this)) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.small_crash_title)
+                .setMessage(R.string.small_crash_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
         if (Prefs.consumeHotwordsCrashNotice(this)) {
             AlertDialog.Builder(this)
                 .setTitle(R.string.hotwords_crash_title)

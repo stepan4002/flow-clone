@@ -16,13 +16,27 @@ import com.flowkey.ime.PunctuationCommands.Word
  */
 object TextCleanup {
 
-    // Conservative standalone fillers for EN / CS / FR / ES.
-    private val FILLERS = setOf(
-        "um", "umm", "uh", "uhm", "er", "erm", "hmm", "hm", "mhm", // en
-        "ehm", "eh",                                               // cs (and general)
-        "euh",                                                     // fr
-        "este", "pues",                                            // es
+    /**
+     * Standalone fillers. Only sounds that are not words in any supported language are
+     * removed everywhere; "um" (Portuguese "a"), "er" (German "he"), "eh" and "este"
+     * (Spanish "this") are words somewhere, so they are removed only in their language.
+     */
+    private val FILLERS_ANY = setOf("umm", "uhm", "uh", "hmm", "hm", "mhm", "ehm", "erm")
+    private val FILLERS_BY_LANGUAGE = mapOf(
+        "en" to setOf("um", "er"),
+        "cs" to setOf("eh"),
+        "sk" to setOf("eh"),
+        "fr" to setOf("euh"),
     )
+
+    private fun fillersFor(lang: String?): Set<String> =
+        FILLERS_ANY + FILLERS_BY_LANGUAGE[lang ?: "en"].orEmpty()
+
+    /**
+     * Separates the phrases of a live session in the raw text. It counts as the end of an
+     * utterance for end-only commands ("Punkt" at the end of a phrase) and is never output.
+     */
+    const val PHRASE_BREAK = "\u001F"
 
     /** Punctuation Whisper attaches to a word, removed when a spoken command follows. */
     private const val TRAILING_PUNCT = ".,!?;:…"
@@ -50,7 +64,8 @@ object TextCleanup {
         for ((from, to) in snippets) text = replacePhrase(text, from, to)
         for ((from, to) in dictionary) text = replacePhrase(text, from, to)
 
-        val pieces = parse(text, removeFillers, commands(commandLanguage, punctuationCommands))
+        val fillers = if (removeFillers) fillersFor(commandLanguage) else emptySet()
+        val pieces = parse(text, fillers, commands(commandLanguage, punctuationCommands))
         var out = assemble(pieces)
 
         out = out.replace(Regex(" {2,}"), " ")
@@ -62,7 +77,8 @@ object TextCleanup {
             out = out.replace(Regex("\\bi\\b"), "I")
         }
         // Last, so the user's own spelling wins even at the start of a sentence ("iPhone").
-        out = WordCorrector.apply(out, words, fuzzy = correctWords)
+        val fuzzy = correctWords && (commandLanguage ?: "en") in WordCorrector.FUZZY_LANGUAGES
+        out = WordCorrector.apply(out, words, fuzzy)
         return out.trim(' ')
     }
 
@@ -72,7 +88,7 @@ object TextCleanup {
         return if (punctuationCommands) table else table.filter { it.pieces == listOf(Scratch) }
     }
 
-    private fun parse(text: String, removeFillers: Boolean, commands: List<Command>): List<Piece> {
+    private fun parse(text: String, fillers: Set<String>, commands: List<Command>): List<Piece> {
         val tokens = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
         // Whisper attaches punctuation to words; commands match on the normalized form only.
         val norm = tokens.map { PunctuationCommands.normalize(it) }
@@ -83,7 +99,11 @@ object TextCleanup {
                 if (i + n > tokens.size) continue
                 if ((0 until n).any { norm[i + it] != c.words[it] }) continue
                 // Ambiguous words only count at the end or directly before another command.
-                if (!c.endOnly || i + n == tokens.size || matchAt(i + n) != null) return c
+                if (!c.endOnly || i + n == tokens.size || tokens[i + n] == PHRASE_BREAK ||
+                    matchAt(i + n) != null
+                ) {
+                    return c
+                }
             }
             return null
         }
@@ -91,6 +111,10 @@ object TextCleanup {
         val pieces = mutableListOf<Piece>()
         var i = 0
         while (i < tokens.size) {
+            if (tokens[i] == PHRASE_BREAK) {
+                i++
+                continue
+            }
             val command = matchAt(i)
             if (command != null) {
                 for (piece in command.pieces) {
@@ -106,7 +130,7 @@ object TextCleanup {
                 i += command.words.size
                 continue
             }
-            if (removeFillers && norm[i] in FILLERS) {
+            if (norm[i] in fillers) {
                 i++
                 continue
             }

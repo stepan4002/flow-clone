@@ -18,6 +18,9 @@ object Prefs {
     private const val KEY_HOTWORDS_LOAD_PENDING = "hotwords_load_pending"
     private const val KEY_HOTWORDS_DISABLED = "hotwords_disabled_after_crash"
     private const val KEY_HOTWORDS_CRASH_NOTICE = "hotwords_crash_notice"
+    private const val KEY_SMALL_LOAD_PENDING = "whisper_small_load_pending"
+    private const val KEY_SMALL_BLOCKED = "whisper_small_blocked"
+    private const val KEY_SMALL_CRASH_NOTICE = "whisper_small_crash_notice"
     private const val KEY_AUTO_STOP = "auto_stop_enabled"
     private const val KEY_AUTO_STOP_MS = "auto_stop_ms"
     private const val KEY_HAPTICS = "haptics_enabled"
@@ -199,6 +202,36 @@ object Prefs {
         return true
     }
 
+    /**
+     * Crash guard for loading Whisper small (~400 MB; can be killed for memory). After a crash
+     * small is blocked and FlowKey loads base, until the user turns small on again.
+     */
+    fun setWhisperSmallLoadPending(context: Context, pending: Boolean) {
+        runtime(context).edit().putBoolean(KEY_SMALL_LOAD_PENDING, pending).commit()
+    }
+
+    fun isWhisperSmallLoadPending(context: Context): Boolean =
+        runtime(context).getBoolean(KEY_SMALL_LOAD_PENDING, false)
+
+    fun isWhisperSmallBlocked(context: Context): Boolean =
+        runtime(context).getBoolean(KEY_SMALL_BLOCKED, false)
+
+    fun blockWhisperSmallAfterCrash(context: Context) {
+        prefs(context).edit().putString(KEY_WHISPER_VARIANT, VARIANT_BASE).commit()
+        runtime(context).edit()
+            .putBoolean(KEY_SMALL_LOAD_PENDING, false)
+            .putBoolean(KEY_SMALL_BLOCKED, true)
+            .putBoolean(KEY_SMALL_CRASH_NOTICE, true)
+            .commit()
+    }
+
+    fun consumeWhisperSmallCrashNotice(context: Context): Boolean {
+        val p = runtime(context)
+        if (!p.getBoolean(KEY_SMALL_CRASH_NOTICE, false)) return false
+        p.edit().putBoolean(KEY_SMALL_CRASH_NOTICE, false).apply()
+        return true
+    }
+
     // ------------------------------------------------------------ dictation
 
     fun isAutoStopEnabled(context: Context): Boolean =
@@ -254,7 +287,9 @@ object Prefs {
         if (prefs(context).getString(KEY_WHISPER_VARIANT, VARIANT_BASE) == VARIANT_SMALL) VARIANT_SMALL else VARIANT_BASE
 
     fun setWhisperVariant(context: Context, variant: String) {
-        prefs(context).edit().putString(KEY_WHISPER_VARIANT, variant).apply()
+        prefs(context).edit().putString(KEY_WHISPER_VARIANT, variant).commit()
+        // Choosing small again is the user's retry after a crash.
+        if (variant == VARIANT_SMALL) runtime(context).edit().putBoolean(KEY_SMALL_BLOCKED, false).commit()
     }
 
     /** Whisper live text: words appear while speaking (needs the bundled VAD). */

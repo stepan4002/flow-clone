@@ -49,9 +49,15 @@ if ($gradleFile -notmatch 'versionName = "([^"]+)"') { throw 'versionName not fo
 $version = $Matches[1]
 $outDir = Join-Path $android ("releases\" + (Get-Date -Format 'yyyy-MM-dd') + "-v$version")
 New-Item -ItemType Directory -Force $outDir | Out-Null
+# A re-run must never mix in APKs from an earlier build of the same day.
+Get-ChildItem $outDir -File | Where-Object { $_.Extension -eq '.apk' -or $_.Name -eq 'SHA256SUMS.txt' } |
+    Remove-Item -Force
 
 $pwLine = Get-Content $props | Where-Object { $_ -match '^FLOWKEY_STORE_PASSWORD=' } | Select-Object -First 1
-$env:FLOWKEY_STORE_PASSWORD = $pwLine.Substring('FLOWKEY_STORE_PASSWORD='.Length).Trim()
+if ($null -eq $pwLine) { throw "FLOWKEY_STORE_PASSWORD missing in $props" }
+# Kept in a local variable; it is put into the environment only while apksigner runs, so the
+# Gradle and Kotlin daemons never inherit it.
+$storePassword = $pwLine.Substring('FLOWKEY_STORE_PASSWORD='.Length).Trim()
 
 # Prefer a Gradle of the wrapper's version that is already unpacked (either -bin or -all):
 # the wrapper insists on its exact flavour and would otherwise download it again.
@@ -83,12 +89,17 @@ function Invoke-Sign([string]$name) {
     $out = Join-Path $outDir $name
     # Old (debug) key signs v1/v2/v3.0 for the lineage; the release key is the app's identity
     # from Android 9 (API 28) on. apksigner aligns the APK itself. No .idsig (v4) file.
-    & $apksigner sign `
-        --ks $debugKs --ks-key-alias androiddebugkey --ks-pass pass:android `
-        --next-signer --ks $releaseKs --ks-key-alias flowkey --ks-pass env:FLOWKEY_STORE_PASSWORD `
-        --lineage $lineage --rotation-min-sdk-version 28 --v4-signing-enabled false `
-        --out $out $unsigned
-    if ($LASTEXITCODE -ne 0) { throw "apksigner sign failed for $name" }
+    $env:FLOWKEY_STORE_PASSWORD = $storePassword
+    try {
+        & $apksigner sign `
+            --ks $debugKs --ks-key-alias androiddebugkey --ks-pass pass:android `
+            --next-signer --ks $releaseKs --ks-key-alias flowkey --ks-pass env:FLOWKEY_STORE_PASSWORD `
+            --lineage $lineage --rotation-min-sdk-version 28 --v4-signing-enabled false `
+            --out $out $unsigned
+        if ($LASTEXITCODE -ne 0) { throw "apksigner sign failed for $name" }
+    } finally {
+        Remove-Item Env:\FLOWKEY_STORE_PASSWORD -ErrorAction SilentlyContinue
+    }
     & $apksigner verify -v --print-certs $out | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "apksigner verify failed for $name" }
     Write-Host "Signed $out"
@@ -113,6 +124,8 @@ try {
 $lines = Get-ChildItem $outDir -Filter '*.apk' | Sort-Object Name | ForEach-Object {
     (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + ' *' + $_.Name
 }
-[IO.File]::WriteAllText((Join-Path $outDir 'SHA256SUMS.txt'), (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
+$sums = Join-Path $outDir 'SHA256SUMS.txt'
+Remove-Item $sums -Force -ErrorAction SilentlyContinue  # a scanner may still hold the old one
+[IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
 Write-Host "==> Release files in $outDir"
 Get-ChildItem $outDir | Format-Table Name, Length -AutoSize | Out-Host

@@ -9,8 +9,8 @@ whatever app has focus.
 **Privacy by construction:** your audio is recognized on the device and never leaves it.
 No analytics, no accounts. Since v1.2 the app holds the `INTERNET` permission for exactly
 one feature: the optional higher-accuracy model, downloaded **only when you tap Download**
-in Setup, from fixed HTTPS URLs on huggingface.co, with every file checked against a
-pinned SHA-256. Nothing else in the app connects anywhere.
+in Setup, from fixed HTTPS URLs on huggingface.co (redirected to its download servers),
+with every file checked against a pinned SHA-256. Nothing else in the app connects anywhere.
 
 ## Features
 
@@ -173,11 +173,15 @@ Notes:
 - Words that are also ordinary words ("point", "punto", "Punkt"…) only count as
   punctuation at the end of what you said, or right before another command. So "à ce
   point" stays as you said it.
-- Filler words (um, uh, er, ehm, euh, este, pues …) are removed. This can be turned off in
-  settings.
+- Filler sounds are removed (hmm, uh, ehm everywhere; "um"/"er" in English, "euh" in
+  French, "eh" in Czech and Slovak — never real words like Portuguese "um" or German "er").
+  This can be turned off in settings.
 - **Your words**: add names and terms in Setup. They get your exact spelling, close
   misspellings of longer words are fixed (can be turned off), and English streaming mode
-  boosts them during recognition.
+  boosts them during recognition. To avoid "fixing" grammar, close-misspelling fixes are off
+  in languages with case endings (Czech, Slovak, Polish, …), word forms with an added ending
+  ("pipelines") are left alone, and short or single capitalized terms ("IT", "May") don't
+  change ordinary words ("it", "may").
 - **Dictionary**: "wrong → right" pairs, applied to every dictation. The "right" side also
   counts as one of your words.
 - **Snippets**: say the trigger phrase, get the expansion (e.g. "my address" → your full

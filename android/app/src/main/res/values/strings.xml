@@ -76,6 +76,8 @@
     <string name="setup_from_hint">Wrong word</string>
     <string name="setup_to_hint">Correct word</string>
 
+    <string name="small_crash_title">Back to the built-in model</string>
+    <string name="small_crash_message">The higher-accuracy model crashed FlowKey while loading, most likely because the phone ran out of memory. FlowKey switched back to the built-in model. You can turn the higher-accuracy model on again in Setup to retry.</string>
     <string name="hotwords_crash_title">Word boosting turned off</string>
     <string name="hotwords_crash_message">The English streaming engine crashed while loading your words, so it now runs without them. Streaming itself stays on. Edit your words to try again.</string>
     <string name="setup_languages_title">Languages</string>
@@ -143,6 +145,6 @@
     <!-- Model instructions dialog -->
     <string name="model_help_title">Install the speech model</string>
     <string name="model_help_copy_path">Copy path</string>
-    <string name="model_help_whisper">FlowKey needs the multilingual Whisper model (all four files):\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2\n(for better quality, use \"Extra: higher-accuracy model\" in Setup instead — do NOT use a \".en\" variant)\n\n2. Extract it and copy these three files:\n• *-encoder.int8.onnx\n• *-decoder.int8.onnx\n• *-tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
+    <string name="model_help_whisper">FlowKey needs the multilingual Whisper model (three files):\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2\n(for better quality, use \"Extra: higher-accuracy model\" in Setup instead — do NOT use a \".en\" variant)\n\n2. Extract it and copy these three files:\n• *-encoder.int8.onnx\n• *-decoder.int8.onnx\n• *-tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
     <string name="model_help_zipformer">Streaming mode needs the English streaming Zipformer model:\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2\n\n2. Extract and copy these four files:\n• encoder-*.int8.onnx\n• decoder-*.onnx\n• joiner-*.int8.onnx\n• tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
 </resources>

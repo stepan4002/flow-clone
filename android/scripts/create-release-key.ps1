@@ -54,8 +54,13 @@ if (-not (Test-Path $releaseKs)) {
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $pw = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
     [IO.File]::WriteAllText($props, "FLOWKEY_STORE_PASSWORD=$pw`n", (New-Object Text.UTF8Encoding $false))
+    # Passed through the environment, not the command line (process lists and audit logs
+    # record command lines).
+    $env:FLOWKEY_STORE_PASSWORD = $pw
     & $keytool -genkeypair -keystore $releaseKs -storetype PKCS12 -alias flowkey -keyalg RSA `
-        -keysize 4096 -validity 10000 -dname 'CN=FlowKey' -storepass $pw -keypass $pw
+        -keysize 4096 -validity 10000 -dname 'CN=FlowKey' `
+        -storepass:env FLOWKEY_STORE_PASSWORD -keypass:env FLOWKEY_STORE_PASSWORD
+    Remove-Item Env:\FLOWKEY_STORE_PASSWORD
     if ($LASTEXITCODE -ne 0) { throw 'keytool -genkeypair failed' }
     Write-Host "Created release key $releaseKs"
 } else {
