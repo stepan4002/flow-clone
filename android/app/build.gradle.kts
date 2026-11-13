@@ -53,6 +53,15 @@ android {
         // Pure-Kotlin logic is unit-tested on the JVM; stub android.* calls (e.g. Log).
         unitTests.isReturnDefaultValues = true
     }
+
+    if (project.hasProperty("noModel")) {
+        // `-PnoModel` builds FlowKey-no-model.apk: aapt's default ignore list plus the
+        // bundled speech models (assets/model/). The VAD and hotwords vocab stay in.
+        androidResources {
+            ignoreAssetsPattern =
+                "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:<dir>model"
+        }
+    }
 }
 
 dependencies {

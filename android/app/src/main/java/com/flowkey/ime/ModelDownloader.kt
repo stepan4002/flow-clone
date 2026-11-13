@@ -139,7 +139,7 @@ object ModelDownloader {
                 done = fetch(file, part, done)
             } catch (e: IOException) {
                 Log.w(TAG, "Download of ${file.name} failed", e)
-                _state.value = DlState.Failed(Reason.NETWORK, e.message ?: "")
+                _state.value = DlState.Failed(Reason.NETWORK, describe(e))
                 return
             }
             _state.value = DlState.Verifying
@@ -157,6 +157,14 @@ object ModelDownloader {
             _state.value = DlState.Running(done, TOTAL_BYTES)
         }
         _state.value = DlState.Done
+    }
+
+    /** A short, human reason for the status line (the full exception is in logcat). */
+    private fun describe(e: IOException): String = when (e) {
+        is java.net.UnknownHostException -> "no internet connection"
+        is java.net.SocketTimeoutException -> "the connection timed out"
+        is javax.net.ssl.SSLException -> "secure connection refused; a network filter may be blocking it"
+        else -> e.message?.take(80) ?: "network error"
     }
 
     private fun partLength(dir: File, file: RemoteFile): Long =

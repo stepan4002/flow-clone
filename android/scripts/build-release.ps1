@@ -53,10 +53,24 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $pwLine = Get-Content $props | Where-Object { $_ -match '^FLOWKEY_STORE_PASSWORD=' } | Select-Object -First 1
 $env:FLOWKEY_STORE_PASSWORD = $pwLine.Substring('FLOWKEY_STORE_PASSWORD='.Length).Trim()
 
-function Invoke-Gradle {
+# Prefer a Gradle of the wrapper's version that is already unpacked (either -bin or -all):
+# the wrapper insists on its exact flavour and would otherwise download it again.
+$wrapperProps = Get-Content (Join-Path $android 'gradle\wrapper\gradle-wrapper.properties') -Raw
+$gradleCmd = Join-Path $android 'gradlew.bat'
+if ($wrapperProps -match 'gradle-([0-9.]+)-(bin|all)\.zip') {
+    $gv = $Matches[1]
+    $dists = Join-Path $env:USERPROFILE '.gradle\wrapper\dists'
+    $cached = Get-ChildItem $dists -Directory -Filter "gradle-$gv-*" -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName '*\gradle-*\bin\gradle.bat' } |
+        ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+    if ($null -ne $cached) { $gradleCmd = $cached.FullName }
+}
+Write-Host "Gradle: $gradleCmd"
+
+function Invoke-Gradle([string[]]$extra = @()) {
     Push-Location $android
     try {
-        & (Join-Path $android 'gradlew.bat') clean assembleRelease --offline --no-daemon -q
+        & $gradleCmd clean assembleRelease --no-daemon -q @extra
         if ($LASTEXITCODE -ne 0) { throw 'gradle assembleRelease failed' }
     } finally {
         Pop-Location
@@ -86,19 +100,11 @@ try {
     Invoke-Sign 'FlowKey.apk'
 
     if (-not $SkipNoModel) {
+        # -PnoModel leaves assets/model/ out of the APK (see app/build.gradle.kts); no files
+        # are moved, so an interrupted build can never misplace the models.
         Write-Host '==> Building FlowKey-no-model.apk'
-        $modelDir = Join-Path $assets 'model'
-        $aside = Join-Path $android 'app\src\model-aside'
-        if (Test-Path $aside) { throw "$aside exists - restore it into assets\model first" }
-        Move-Item $modelDir $aside
-        try {
-            Invoke-Gradle
-            Invoke-Sign 'FlowKey-no-model.apk'
-        } finally {
-            Move-Item $aside $modelDir
-            $n = (Get-ChildItem $modelDir -Recurse -File).Count
-            Write-Host "Restored $n bundled model files"
-        }
+        Invoke-Gradle @('-PnoModel')
+        Invoke-Sign 'FlowKey-no-model.apk'
     }
 } finally {
     Remove-Item Env:\FLOWKEY_STORE_PASSWORD -ErrorAction SilentlyContinue

@@ -676,14 +676,19 @@ class VoiceInputIME : InputMethodService() {
                     }
                     transcribing = false
                     when {
-                        shouldCommit && sessionRaw.isNotBlank() -> commitSegment(sessionRaw.toString())
+                        shouldCommit && sessionRaw.isNotBlank() -> {
+                            commitSegment(sessionRaw.toString())
+                            refreshIdleStatus()
+                        }
                         shouldCommit && !heardVoice -> {
                             clearPlaceholder()
-                            setStatus(getString(R.string.status_no_speech))
+                            setStatus(getString(R.string.status_no_speech)) // keep it visible
                         }
-                        else -> clearPlaceholder()
+                        else -> {
+                            clearPlaceholder()
+                            refreshIdleStatus()
+                        }
                     }
-                    refreshIdleStatus()
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
