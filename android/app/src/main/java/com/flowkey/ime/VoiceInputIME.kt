@@ -66,6 +66,7 @@ class VoiceInputIME : InputMethodService() {
         val autoStopMs: Long,
         val removeFillers: Boolean,
         val punctuationCommands: Boolean,
+        val correctWords: Boolean,
         /** Prefs language for this session ("auto" or a code); "en" in streaming mode. */
         val language: String,
     )
@@ -92,11 +93,13 @@ class VoiceInputIME : InputMethodService() {
 
     private var dictionary: List<UserData.Entry> = emptyList()
     private var snippets: List<UserData.Entry> = emptyList()
+    private var userTerms: List<String> = emptyList()
     private var options = SessionOptions(
         autoStop = true,
         autoStopMs = 2500L,
         removeFillers = true,
         punctuationCommands = true,
+        correctWords = true,
         language = "en",
     )
 
@@ -288,11 +291,13 @@ class VoiceInputIME : InputMethodService() {
         needLeadingSpace = before.isNotEmpty() && !before.last().isWhitespace()
         dictionary = UserData.getDictionary(this)
         snippets = UserData.getSnippets(this)
+        userTerms = UserData.userTerms(this)
         options = SessionOptions(
             autoStop = Prefs.isAutoStopEnabled(this),
             autoStopMs = Prefs.getAutoStopMs(this),
             removeFillers = Prefs.isFillerRemovalEnabled(this),
             punctuationCommands = Prefs.isPunctuationCommandsEnabled(this),
+            correctWords = Prefs.isWordCorrectionEnabled(this),
             language = if (Prefs.isStreamingMode(this)) "en" else Prefs.getLanguage(this),
         )
         sessionLang = null
@@ -552,6 +557,8 @@ class VoiceInputIME : InputMethodService() {
             removeFillers = options.removeFillers,
             punctuationCommands = options.punctuationCommands,
             commandLanguage = commandLanguage(detectedLang),
+            words = userTerms,
+            correctWords = options.correctWords,
         )
         if (cleaned.isEmpty()) {
             ic.commitText("", 1)

@@ -7,8 +7,9 @@ import org.json.JSONException
 import org.json.JSONObject
 
 /**
- * User dictionary (misrecognized word -> correction) and snippets
- * (spoken trigger phrase -> expansion), persisted as JSON in SharedPreferences.
+ * User dictionary (misrecognized word -> correction), snippets (spoken trigger phrase ->
+ * expansion) and "your words" (names and terms to recognize), persisted as JSON in
+ * SharedPreferences.
  */
 object UserData {
 
@@ -17,6 +18,8 @@ object UserData {
     private const val FILE = "flowkey_user_data"
     private const val KEY_DICTIONARY = "dictionary"
     private const val KEY_SNIPPETS = "snippets"
+    private const val KEY_WORDS = "words"
+    const val MAX_WORDS = 200
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -36,6 +39,44 @@ object UserData {
 
     fun removeSnippet(context: Context, index: Int) =
         save(context, KEY_SNIPPETS, load(context, KEY_SNIPPETS).filterIndexed { i, _ -> i != index })
+
+    fun getWords(context: Context): List<String> {
+        val json = prefs(context).getString(KEY_WORDS, null) ?: return emptyList()
+        return try {
+            val array = JSONArray(json)
+            (0 until array.length()).map { array.optString(it).trim() }.filter { it.isNotEmpty() }
+        } catch (e: JSONException) {
+            emptyList()
+        }
+    }
+
+    /** Adds a word or short phrase. Returns false if empty, a duplicate, or the list is full. */
+    fun addWord(context: Context, word: String): Boolean {
+        val w = word.trim().replace(Regex("\\s+"), " ")
+        val words = getWords(context)
+        if (w.isEmpty() || words.size >= MAX_WORDS) return false
+        if (words.any { it.equals(w, ignoreCase = true) }) return false
+        saveWords(context, words + w)
+        return true
+    }
+
+    fun removeWord(context: Context, index: Int) =
+        saveWords(context, getWords(context).filterIndexed { i, _ -> i != index })
+
+    /**
+     * Terms FlowKey should recognize: "your words" plus every dictionary correction target.
+     * Used both for correcting Whisper output and as hotwords for the streaming engine.
+     */
+    fun userTerms(context: Context): List<String> =
+        (getWords(context) + getDictionary(context).map { it.to.trim() })
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+
+    private fun saveWords(context: Context, words: List<String>) {
+        val array = JSONArray()
+        for (w in words) array.put(w)
+        prefs(context).edit().putString(KEY_WORDS, array.toString()).apply()
+    }
 
     private fun load(context: Context, key: String): List<Entry> {
         val json = prefs(context).getString(key, null) ?: return emptyList()

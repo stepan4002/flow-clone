@@ -71,6 +71,11 @@
     <string name="setup_from_hint">Wrong word</string>
     <string name="setup_to_hint">Correct word</string>
 
+    <string name="setup_words_title">Your words</string>
+    <string name="setup_words_desc">Names, brands and jargon. FlowKey fixes their spelling in what you dictate, and the English streaming engine listens for them.</string>
+    <string name="setup_word_hint">e.g. Kubernetes</string>
+    <string name="setup_word_not_added">Already in the list, or the list is full (200 words).</string>
+    <string name="setup_word_correction_switch">Also fix close misspellings</string>
     <string name="setup_snippets_title">Snippets</string>
     <string name="setup_snippets_desc">Say a trigger phrase to insert a longer text.</string>
     <string name="setup_trigger_hint">Trigger phrase</string>

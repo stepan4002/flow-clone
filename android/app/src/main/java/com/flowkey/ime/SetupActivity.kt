@@ -14,6 +14,7 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -129,6 +130,11 @@ class SetupActivity : AppCompatActivity() {
             Prefs.setPunctuationCommandsEnabled(this, checked)
         }
 
+        binding.switchWordCorrection.isChecked = Prefs.isWordCorrectionEnabled(this)
+        binding.switchWordCorrection.setOnCheckedChangeListener { _, checked ->
+            Prefs.setWordCorrectionEnabled(this, checked)
+        }
+
         binding.switchFillers.isChecked = Prefs.isFillerRemovalEnabled(this)
         binding.switchFillers.setOnCheckedChangeListener { _, checked ->
             Prefs.setFillerRemovalEnabled(this, checked)
@@ -181,7 +187,17 @@ class SetupActivity : AppCompatActivity() {
                 UserData.addDictionary(this, from, to)
                 binding.editDictFrom.text?.clear()
                 binding.editDictTo.text?.clear()
-                renderLists()
+                onUserTermsChanged()
+            }
+        }
+        binding.buttonAddWord.setOnClickListener {
+            val word = binding.editWord.text.toString().trim()
+            if (word.isEmpty()) return@setOnClickListener
+            if (UserData.addWord(this, word)) {
+                binding.editWord.text?.clear()
+                onUserTermsChanged()
+            } else {
+                Toast.makeText(this, R.string.setup_word_not_added, Toast.LENGTH_SHORT).show()
             }
         }
         binding.buttonAddSnippet.setOnClickListener {
@@ -259,12 +275,22 @@ class SetupActivity : AppCompatActivity() {
     private fun renderLists() {
         renderList(binding.listDictionary, UserData.getDictionary(this)) { index ->
             UserData.removeDictionary(this, index)
-            renderLists()
+            onUserTermsChanged()
+        }
+        renderList(binding.listWords, UserData.getWords(this).map { UserData.Entry(it, "") }) { index ->
+            UserData.removeWord(this, index)
+            onUserTermsChanged()
         }
         renderList(binding.listSnippets, UserData.getSnippets(this)) { index ->
             UserData.removeSnippet(this, index)
             renderLists()
         }
+    }
+
+    /** Words and dictionary targets feed the streaming engine's hotwords: reload it. */
+    private fun onUserTermsChanged() {
+        renderLists()
+        RecognizerManager.onUserTermsChanged(this)
     }
 
     private fun renderList(
@@ -288,7 +314,11 @@ class SetupActivity : AppCompatActivity() {
                 setPadding(0, dp(4), 0, dp(4))
             }
             row.addView(TextView(this).apply {
-                text = getString(R.string.setup_list_entry, entry.from, entry.to)
+                text = if (entry.to.isEmpty()) {
+                    entry.from
+                } else {
+                    getString(R.string.setup_list_entry, entry.from, entry.to)
+                }
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 )

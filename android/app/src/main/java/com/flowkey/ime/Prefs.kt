@@ -21,6 +21,7 @@ object Prefs {
     private const val KEY_SOUND = "sound_enabled"
     private const val KEY_PUNCTUATION_COMMANDS = "punctuation_commands_enabled"
     private const val KEY_FILLER_REMOVAL = "filler_removal_enabled"
+    private const val KEY_WORD_CORRECTION = "word_correction_enabled"
 
     /**
      * Crash-guard flags live in their own file, which is excluded from backup and device
@@ -202,5 +203,13 @@ object Prefs {
 
     fun setFillerRemovalEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_FILLER_REMOVAL, enabled).apply()
+    }
+
+    /** Auto-correct close misspellings of the user's words (exact casing is always applied). */
+    fun isWordCorrectionEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_WORD_CORRECTION, true)
+
+    fun setWordCorrectionEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_WORD_CORRECTION, enabled).apply()
     }
 }

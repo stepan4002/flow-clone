@@ -54,6 +54,9 @@ object RecognizerManager {
     private var loadedStreamingMode: Boolean? = null
     private var loadedLanguage: String? = null
 
+    /** A forced reload asked for while a load was running; re-run once that load ends. */
+    @Volatile private var reloadRequested = false
+
     /**
      * Idempotent: does nothing if the right engine is already loaded or loading.
      * Pass [force] to retry after an error / missing model, or after switching engines.
@@ -68,7 +71,11 @@ object RecognizerManager {
         }
         val wantStreaming = Prefs.isStreamingMode(appContext)
         when (val current = _state.value) {
-            is State.Loading -> return
+            is State.Loading -> {
+                // Don't drop a forced reload (e.g. two quick word edits): redo it afterwards.
+                if (force) reloadRequested = true
+                return
+            }
             is State.Ready -> {
                 if (loadedStreamingMode == wantStreaming && !force) {
                     if (!wantStreaming) applyLanguage(appContext)
@@ -111,7 +118,21 @@ object RecognizerManager {
             // Also catches UnsatisfiedLinkError when the sherpa-onnx AAR is missing.
             Log.e(TAG, "Failed to load recognizer (streaming=$streaming)", t)
             _state.value = State.Error(t.message ?: t.javaClass.simpleName)
+        } finally {
+            if (reloadRequested) {
+                reloadRequested = false
+                initialize(context, force = true)
+            }
         }
+    }
+
+    /**
+     * The user's words or dictionary changed. They are the streaming engine's hotwords, which
+     * are baked in when the recognizer is built, so rebuild it if streaming is active.
+     */
+    fun onUserTermsChanged(context: Context) {
+        val appContext = context.applicationContext
+        if (Prefs.isStreamingMode(appContext)) initialize(appContext, force = true)
     }
 
     private fun loadWhisper(context: Context) {

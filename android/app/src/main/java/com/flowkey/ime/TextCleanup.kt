@@ -30,6 +30,8 @@ object TextCleanup {
     /**
      * @param commandLanguage language whose spoken commands apply; null = unknown (English
      *   commands, no English-only "i" fix); a language without a table gets no commands.
+     * @param words the user's terms; exact matches get the user's spelling.
+     * @param correctWords also fix close misspellings of [words] (see [WordCorrector]).
      */
     fun process(
         raw: String,
@@ -39,6 +41,8 @@ object TextCleanup {
         removeFillers: Boolean = true,
         punctuationCommands: Boolean = true,
         commandLanguage: String? = "en",
+        words: List<String> = emptyList(),
+        correctWords: Boolean = false,
     ): String {
         var text = raw.trim()
         if (text.isEmpty()) return ""
@@ -57,6 +61,8 @@ object TextCleanup {
             // covers i, i'm, i'll, i've, i'd — English only ("i" is a word in Czech)
             out = out.replace(Regex("\\bi\\b"), "I")
         }
+        // Last, so the user's own spelling wins even at the start of a sentence ("iPhone").
+        out = WordCorrector.apply(out, words, fuzzy = correctWords)
         return out.trim(' ')
     }
 
