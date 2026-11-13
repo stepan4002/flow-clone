@@ -16,7 +16,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A separate app next to the release: a debug build can never be installed over
+            // the rotated release key (signature mismatch), so it gets its own package.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
+            // Deliberately no signingConfig: releases are signed by scripts/build-release.ps1
+            // with apksigner key rotation (debug key -> release key), which Gradle can't do.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

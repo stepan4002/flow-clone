@@ -24,6 +24,8 @@ captures/
 keystore.properties
 *.jks
 *.keystore
+*lineage*.bin
+*signing*.properties
 
 # ---------- Large binaries: shipped via GitHub Releases, fetched by scripts ----------
 *.apk

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds install as a separate app (applicationIdSuffix ".debug"). -->
+<resources>
+    <string name="app_name">FlowKey debug</string>
+    <string name="ime_name">FlowKey debug</string>
+</resources>
