@@ -6,14 +6,12 @@ import android.content.SharedPreferences
 /** App settings persisted in SharedPreferences. */
 object Prefs {
 
-    /** Cycle order for the IME language key. "auto" = Whisper per-utterance auto-detect. */
-    val LANGUAGES = listOf("auto", "en", "cs", "fr", "es")
-
     /** Auto-stop silence duration choices, in milliseconds (UI shows seconds). */
     val AUTO_STOP_CHOICES_MS = listOf(1500L, 2000L, 2500L, 3000L, 4000L)
 
     private const val FILE = "flowkey_settings"
     private const val KEY_LANGUAGE = "language"
+    private const val KEY_ENABLED_LANGUAGES = "enabled_languages"
     private const val KEY_STREAMING = "streaming_mode"
     private const val KEY_STREAMING_LOAD_PENDING = "streaming_load_pending"
     private const val KEY_STREAMING_CRASH_NOTICE = "streaming_crash_notice"
@@ -61,9 +59,42 @@ object Prefs {
 
     // ------------------------------------------------------------- language
 
+    /**
+     * Cycle order of the IME language key: "auto" (Whisper per-utterance auto-detect) followed
+     * by the languages the user enabled. Fresh installs start with [Languages.PRESET].
+     */
+    fun getEnabledLanguages(context: Context): List<String> =
+        listOf(Languages.AUTO) + enabledCodes(context)
+
+    private fun enabledCodes(context: Context): List<String> =
+        Languages.parseEnabled(prefs(context).getString(KEY_ENABLED_LANGUAGES, null))
+
+    /** Adds a Whisper language to the language key. Returns false if invalid or already there. */
+    fun addLanguage(context: Context, code: String): Boolean {
+        val codes = enabledCodes(context)
+        if (!Languages.isValid(code) || code in codes) return false
+        prefs(context).edit().putString(KEY_ENABLED_LANGUAGES, Languages.toCsv(codes + code)).apply()
+        return true
+    }
+
+    /**
+     * Removes a language from the language key. The last language is kept. If it was the
+     * active one, the key falls back to auto-detect. Returns false if nothing was removed.
+     */
+    fun removeLanguage(context: Context, code: String): Boolean {
+        val codes = enabledCodes(context)
+        if (code !in codes || codes.size <= 1) return false
+        val active = getLanguage(context)
+        prefs(context).edit()
+            .putString(KEY_ENABLED_LANGUAGES, Languages.toCsv(codes - code))
+            .putString(KEY_LANGUAGE, Languages.afterRemove(active, code))
+            .apply()
+        return true
+    }
+
     fun getLanguage(context: Context): String {
-        val value = prefs(context).getString(KEY_LANGUAGE, "auto") ?: "auto"
-        return if (value in LANGUAGES) value else "auto"
+        val value = prefs(context).getString(KEY_LANGUAGE, Languages.AUTO) ?: Languages.AUTO
+        return if (value in getEnabledLanguages(context)) value else Languages.AUTO
     }
 
     fun setLanguage(context: Context, lang: String) {
@@ -71,18 +102,21 @@ object Prefs {
     }
 
     fun nextLanguage(context: Context): String {
-        val next = LANGUAGES[(LANGUAGES.indexOf(getLanguage(context)) + 1) % LANGUAGES.size]
+        val next = Languages.next(getLanguage(context), enabledCodes(context))
         setLanguage(context, next)
         return next
     }
 
-    /** The value passed to OfflineWhisperModelConfig.language ("" = auto-detect). */
+    /**
+     * The value passed to OfflineWhisperModelConfig.language ("" = auto-detect). Anything that
+     * is not a known Whisper code becomes "", because an unknown code kills the process natively.
+     */
     fun whisperLanguage(context: Context): String =
-        getLanguage(context).let { if (it == "auto") "" else it }
+        getLanguage(context).let { if (Languages.isValid(it)) it else "" }
 
     // --------------------------------------------------------------- engine
 
-    /** Optional secondary engine: English-only streaming Zipformer with live partials. */
+    /** Optional engine: the English streaming Zipformer (live partials, hotwords). */
     fun isStreamingMode(context: Context): Boolean =
         prefs(context).getBoolean(KEY_STREAMING, false)
 

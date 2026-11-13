@@ -624,6 +624,7 @@ class VoiceInputIME : InputMethodService() {
     }
 
     private fun updateLangButton() {
+        // Any Whisper code fits: "AUTO" (4 letters) is already the widest label.
         langButton?.text = if (Prefs.isStreamingMode(this)) "EN" else langLabel()
     }
 

@@ -1,14 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Must stay aligned with Prefs.LANGUAGES -->
-    <string-array name="language_entries">
-        <item>Auto-detect</item>
-        <item>English</item>
-        <item>Czech (Čeština)</item>
-        <item>French (Français)</item>
-        <item>Spanish (Español)</item>
-    </string-array>
-
     <!-- Must stay aligned with Prefs.AUTO_STOP_CHOICES_MS -->
     <string-array name="auto_stop_entries">
         <item>1.5 seconds</item>

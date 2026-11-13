@@ -87,22 +87,7 @@ class SetupActivity : AppCompatActivity() {
     // ------------------------------------------------------------- settings
 
     private fun setupSettings() {
-        // Language spinner (positions align with Prefs.LANGUAGES).
-        binding.spinnerLanguage.adapter = ArrayAdapter.createFromResource(
-            this, R.array.language_entries, android.R.layout.simple_spinner_dropdown_item
-        )
-        binding.spinnerLanguage.setSelection(Prefs.LANGUAGES.indexOf(Prefs.getLanguage(this)))
-        binding.spinnerLanguage.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val lang = Prefs.LANGUAGES.getOrElse(position) { "auto" }
-                if (lang != Prefs.getLanguage(this@SetupActivity)) {
-                    Prefs.setLanguage(this@SetupActivity, lang)
-                    RecognizerManager.applyLanguage(this@SetupActivity)
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
+        rebuildLanguageSpinner()
 
         // Auto-stop duration spinner (positions align with Prefs.AUTO_STOP_CHOICES_MS).
         binding.spinnerAutoStop.adapter = ArrayAdapter.createFromResource(
@@ -151,6 +136,33 @@ class SetupActivity : AppCompatActivity() {
 
         binding.switchStreaming.isChecked = Prefs.isStreamingMode(this)
         setupStreamingSwitchListener()
+    }
+
+    /**
+     * (Re)builds the language spinner from the enabled languages. The listener is detached
+     * while the adapter and selection change, so a rebuild never writes a language back.
+     */
+    private fun rebuildLanguageSpinner() {
+        val spinner = binding.spinnerLanguage
+        spinner.onItemSelectedListener = null
+        val codes = Prefs.getEnabledLanguages(this)
+        val labels = codes.map {
+            if (it == Languages.AUTO) getString(R.string.lang_auto_detect) else Languages.displayName(it)
+        }
+        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        spinner.setSelection(codes.indexOf(Prefs.getLanguage(this)).coerceAtLeast(0), false)
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val lang = Prefs.getEnabledLanguages(this@SetupActivity)
+                    .getOrElse(position) { Languages.AUTO }
+                if (lang != Prefs.getLanguage(this@SetupActivity)) {
+                    Prefs.setLanguage(this@SetupActivity, lang)
+                    RecognizerManager.applyLanguage(this@SetupActivity)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     private fun setupStreamingSwitchListener() {

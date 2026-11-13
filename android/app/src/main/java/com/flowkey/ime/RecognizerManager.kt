@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Loads and owns the (expensive) sherpa-onnx recognizer as a process-wide singleton.
  *
- * Default engine: multilingual Whisper via OfflineRecognizer (EN/CS/FR/ES + auto-detect).
+ * Default engine: multilingual Whisper via OfflineRecognizer (99 languages + auto-detect).
  * Optional engine: English streaming Zipformer via OnlineRecognizer (live partials).
  */
 object RecognizerManager {

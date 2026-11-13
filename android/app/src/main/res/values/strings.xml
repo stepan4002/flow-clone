@@ -21,6 +21,7 @@
 
     <string name="action_open_setup">Open setup</string>
     <string name="lang_auto">AUTO</string>
+    <string name="lang_auto_detect">Auto-detect</string>
 
     <!-- Content descriptions -->
     <string name="cd_mic">Start or stop dictation</string>
