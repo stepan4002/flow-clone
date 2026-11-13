@@ -91,6 +91,9 @@ becomes correspondingly large (and Android Studio installs get slower).
 
 ## 3. Optional engine model: English streaming Zipformer (live partial words)
 
+**Already included in the release `FlowKey.apk`** — skip this section unless you use
+`FlowKey-no-model.apk` or your own build. (`./fetch-deps.sh --model` bundles it for you.)
+
 Only needed if you enable **"English streaming mode"** in FlowKey settings. English-only,
 but shows words as you speak and supports hands-free continuous dictation with automatic
 sentence endpointing.

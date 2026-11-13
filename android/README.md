@@ -30,7 +30,7 @@ the device.
 
 On your phone, open
 **https://github.com/stepan4002/flow-clone/releases/latest/download/FlowKey.apk**
-(~210 MB, the multilingual Whisper model is included), allow your browser/Files app to
+(~285 MB, both models included: multilingual Whisper and the English streaming Zipformer), allow your browser/Files app to
 install it, then open **FlowKey** and follow the 4 setup steps.
 
 With USB debugging enabled you can also install it from a Windows PC in one line:
@@ -46,7 +46,7 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/scripts/install
 ```bash
 cd android
 ./fetch-deps.sh            # downloads the sherpa-onnx AAR into app/libs/
-./fetch-deps.sh --model    # optional: also bundle the Whisper model into the APK
+./fetch-deps.sh --model    # optional: also bundle both speech models into the APK
 ./gradlew assembleDebug    # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -158,8 +158,8 @@ Notes:
 - Haptic feedback and start/stop sound cue
 - Spoken punctuation commands on/off; filler removal on/off
 - **English streaming mode**: switches to the Zipformer streaming engine (live partial
-  text, hands-free continuous dictation, English-only; needs the second model from
-  MODELS.md)
+  text, hands-free continuous dictation, English-only; the model ships in `FlowKey.apk`,
+  or see MODELS.md §3 for builds without it)
 
 ---
 
@@ -176,7 +176,7 @@ Notes:
 | Transcription is slow | Use `whisper-base` instead of `small`; close memory-heavy apps; make sure you copied the `int8` files. |
 | First dictation after opening the keyboard is delayed | The model loads once per process ("Loading model…"); subsequent dictations are fast. |
 | Auto-stop triggers while you think | Increase the silence duration in settings, or disable auto-stop (then only tapping the mic stops the take, max 60 s). |
-| Streaming mode says model missing | It needs the separate Zipformer model in `.../model/zipformer/` — see MODELS.md §3. |
+| Streaming mode says model missing | You installed `FlowKey-no-model.apk` or your own build without bundled models. Install `FlowKey.apk`, or turn streaming mode off, or copy the Zipformer model into `.../model/zipformer/` — see MODELS.md §3. |
 
 ---
 

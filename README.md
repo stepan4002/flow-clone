@@ -32,7 +32,7 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | i
 Then hold **Ctrl + Win**, speak, release. (First start downloads the ~330 MB speech model once.)
 
 **Android 8+** — open this link on your phone and install:
-**[FlowKey.apk](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowKey.apk)** (speech model included, ~210 MB)
+**[FlowKey.apk](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowKey.apk)** (speech models included, ~285 MB)
 
 <sub>Prefer to read before you run? See <a href="install.ps1"><code>install.ps1</code></a> — it installs per-user into <code>%LOCALAPPDATA%\FlowClone</code>, needs no admin rights, and is easy to <a href="#uninstall">uninstall</a>.</sub>
 
@@ -106,7 +106,7 @@ python run.py
 
 ```bash
 cd flow-clone/android
-./fetch-deps.sh          # sherpa-onnx AAR (add --model to bundle the speech model)
+./fetch-deps.sh          # sherpa-onnx AAR (add --model to bundle the speech models)
 ./gradlew assembleDebug
 ```
 

@@ -2,11 +2,12 @@
 # Downloads the large build inputs that are NOT stored in git:
 #   - the sherpa-onnx Android AAR       -> app/libs/          (required to build)
 #   - the multilingual Whisper base model -> app/src/main/assets/model/whisper/
-#     (optional: only with --model, to build an APK that ships with the model)
+#   - the English streaming Zipformer     -> app/src/main/assets/model/zipformer/
+#     (both optional: only with --model, to build an APK that ships with the models)
 #
 # Usage (Linux, macOS, or Git Bash on Windows), from the android/ folder:
 #   ./fetch-deps.sh            # AAR only
-#   ./fetch-deps.sh --model    # AAR + bundled model
+#   ./fetch-deps.sh --model    # AAR + bundled models
 set -euo pipefail
 
 SHERPA_VERSION="1.12.14"
@@ -37,6 +38,22 @@ if [ "${1:-}" = "--model" ]; then
        "$tmp"/sherpa-onnx-whisper-base/base-tokens.txt "$dest/"
     rm -rf "$tmp"
     echo "==> Model copied to $dest"
+  fi
+
+  zdest="app/src/main/assets/model/zipformer"
+  zname="sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  if [ -f "$zdest/tokens.txt" ]; then
+    echo "==> Streaming model already present in $zdest"
+  else
+    echo "==> Downloading English streaming Zipformer model (~310 MB download, ~70 MB kept)"
+    tmp="$(mktemp -d)"
+    curl -fL --retry 3 -o "$tmp/zipformer.tar.bz2"       "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${zname}.tar.bz2"
+    tar -xjf "$tmp/zipformer.tar.bz2" -C "$tmp"
+    mkdir -p "$zdest"
+    # int8 encoder/joiner + fp32 decoder: the combination sherpa-onnx recommends on Android
+    cp "$tmp/$zname"/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx        "$tmp/$zname"/decoder-epoch-99-avg-1-chunk-16-left-128.onnx        "$tmp/$zname"/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx        "$tmp/$zname"/tokens.txt "$zdest/"
+    rm -rf "$tmp"
+    echo "==> Streaming model copied to $zdest"
   fi
 fi
 

@@ -3,6 +3,13 @@
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/);
 versioning: [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-11-13
+
+### Android — FlowKey
+- `FlowKey.apk` now also bundles the English streaming Zipformer model, so
+  "English streaming mode" works right after install with no manual model copy
+- `fetch-deps.sh --model` downloads both models
+
 ## [1.0.0] — 2026-11-13
 
 First public release.
