@@ -49,16 +49,27 @@ if ($gradleFile -notmatch 'versionName = "([^"]+)"') { throw 'versionName not fo
 $version = $Matches[1]
 $outDir = Join-Path $android ("releases\" + (Get-Date -Format 'yyyy-MM-dd') + "-v$version")
 New-Item -ItemType Directory -Force $outDir | Out-Null
-# A re-run must never mix in APKs from an earlier build of the same day.
+# A re-run must never mix in APKs from an earlier build of the same day. Nothing is deleted:
+# earlier APKs are moved to superseded\<time>\ next to the new ones.
 # Virus scanners and the search indexer briefly lock fresh files in this folder: retry.
 function Invoke-Retry([scriptblock]$action) {
     for ($i = 1; $i -le 10; $i++) {
         try { & $action; return } catch { if ($i -eq 10) { throw } ; Start-Sleep -Milliseconds 500 }
     }
 }
-# (SHA256SUMS.txt is overwritten at the end instead: deleting it can be refused while locked.)
-Get-ChildItem $outDir -File -Filter '*.apk' |
-    ForEach-Object { $path = $_.FullName; Invoke-Retry { Remove-Item $path -Force -ErrorAction Stop } }
+$oldApks = @(Get-ChildItem $outDir -File -Filter '*.apk')
+if ($oldApks.Count -gt 0) {
+    $superseded = Join-Path $outDir ('superseded\' + (Get-Date -Format 'HHmmss'))
+    New-Item -ItemType Directory -Force $superseded | Out-Null
+    # (SHA256SUMS.txt is overwritten at the end; the copy here documents the old APKs.)
+    $oldSums = Join-Path $outDir 'SHA256SUMS.txt'
+    if (Test-Path $oldSums) { Copy-Item $oldSums $superseded }
+    foreach ($apk in $oldApks) {
+        $path = $apk.FullName
+        Invoke-Retry { Move-Item $path $superseded -Force -ErrorAction Stop }
+    }
+    Write-Host "Moved $($oldApks.Count) earlier APK(s) to $superseded"
+}
 
 $pwLine = Get-Content $props | Where-Object { $_ -match '^FLOWKEY_STORE_PASSWORD=' } | Select-Object -First 1
 if ($null -eq $pwLine) { throw "FLOWKEY_STORE_PASSWORD missing in $props" }
