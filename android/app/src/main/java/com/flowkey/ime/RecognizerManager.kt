@@ -35,7 +35,7 @@ object RecognizerManager {
     private const val TAG = "FlowKeyRecognizer"
 
     sealed class Engine {
-        class Whisper(val recognizer: OfflineRecognizer) : Engine()
+        class Whisper(val recognizer: OfflineRecognizer, val variant: String) : Engine()
         class Streaming(val recognizer: OnlineRecognizer) : Engine()
     }
 
@@ -55,6 +55,15 @@ object RecognizerManager {
     private var whisperFiles: ModelLocator.WhisperModel? = null
     private var loadedStreamingMode: Boolean? = null
     private var loadedLanguage: String? = null
+
+    /**
+     * Set by the keyboard while a dictation session holds the engine. A replaced engine is
+     * released right away only when no session can still be using it.
+     */
+    @Volatile var sessionActive = false
+
+    /** The engine currently published as Ready (state is Loading while it is replaced). */
+    @Volatile private var lastEngine: Engine? = null
 
     /** A forced reload asked for while a load was running; re-run once that load ends. */
     @Volatile private var reloadRequested = false
@@ -78,6 +87,7 @@ object RecognizerManager {
             Prefs.disableStreamingAfterCrash(appContext)
         }
         val wantStreaming = Prefs.isStreamingMode(appContext)
+        val wantVariant = Prefs.getWhisperVariant(appContext)
         when (val current = _state.value) {
             is State.Loading -> {
                 // Don't drop a forced reload (e.g. two quick word edits): redo it afterwards.
@@ -85,7 +95,10 @@ object RecognizerManager {
                 return
             }
             is State.Ready -> {
-                if (loadedStreamingMode == wantStreaming && !force) {
+                val variantOk = wantStreaming ||
+                    (current.engine as? Engine.Whisper)?.variant == wantVariant ||
+                    !ModelDownloader.isInstalled(appContext) // small wanted but missing: keep base
+                if (loadedStreamingMode == wantStreaming && variantOk && !force) {
                     if (!wantStreaming) applyLanguage(appContext)
                     return
                 }
@@ -176,7 +189,7 @@ object RecognizerManager {
     }
 
     private fun loadWhisper(context: Context) {
-        val model = ModelLocator.locateWhisper(context)
+        val model = ModelLocator.locateWhisper(context, Prefs.getWhisperVariant(context))
         if (model == null) {
             _state.value = State.ModelMissing(ModelLocator.whisperDir(context).absolutePath, false)
             return
@@ -184,9 +197,14 @@ object RecognizerManager {
         whisperFiles = model
         val lang = Prefs.whisperLanguage(context)
         val recognizer = OfflineRecognizer(config = whisperConfig(model, lang))
+        val previous = lastEngine
         loadedStreamingMode = false
         loadedLanguage = lang
-        _state.value = State.Ready(Engine.Whisper(recognizer))
+        Log.i(TAG, "Whisper ${model.variant} loaded")
+        val engine = Engine.Whisper(recognizer, model.variant)
+        lastEngine = engine
+        _state.value = State.Ready(engine)
+        releaseIfIdle(previous)
     }
 
     private fun loadStreaming(context: Context) {
@@ -237,9 +255,29 @@ object RecognizerManager {
             Prefs.setStreamingLoadPending(context, false)
             if (hot != null) Prefs.setHotwordsLoadPending(context, false)
         }
+        val previous = lastEngine
         loadedStreamingMode = true
         loadedLanguage = "en"
-        _state.value = State.Ready(Engine.Streaming(recognizer))
+        val engine = Engine.Streaming(recognizer)
+        lastEngine = engine
+        _state.value = State.Ready(engine)
+        releaseIfIdle(previous)
+    }
+
+    /**
+     * Frees a replaced engine's native memory now (Whisper small alone is ~400 MB) instead of
+     * waiting for finalize(). Skipped while a dictation session may still be decoding with it.
+     */
+    private fun releaseIfIdle(engine: Engine?) {
+        if (engine == null || sessionActive) return
+        try {
+            when (engine) {
+                is Engine.Whisper -> engine.recognizer.release()
+                is Engine.Streaming -> engine.recognizer.release()
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Releasing the previous engine failed", t)
+        }
     }
 
     private fun whisperConfig(

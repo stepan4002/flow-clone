@@ -26,6 +26,10 @@ object Prefs {
     private const val KEY_FILLER_REMOVAL = "filler_removal_enabled"
     private const val KEY_WORD_CORRECTION = "word_correction_enabled"
     private const val KEY_LIVE_TEXT = "live_text_enabled"
+    private const val KEY_WHISPER_VARIANT = "whisper_variant"
+
+    const val VARIANT_BASE = "base"
+    const val VARIANT_SMALL = "small"
 
     /**
      * Crash-guard flags live in their own file, which is excluded from backup and device
@@ -243,6 +247,14 @@ object Prefs {
 
     fun setFillerRemovalEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_FILLER_REMOVAL, enabled).apply()
+    }
+
+    /** Which Whisper model to load: the bundled base, or the downloaded small one. */
+    fun getWhisperVariant(context: Context): String =
+        if (prefs(context).getString(KEY_WHISPER_VARIANT, VARIANT_BASE) == VARIANT_SMALL) VARIANT_SMALL else VARIANT_BASE
+
+    fun setWhisperVariant(context: Context, variant: String) {
+        prefs(context).edit().putString(KEY_WHISPER_VARIANT, variant).apply()
     }
 
     /** Whisper live text: words appear while speaking (needs the bundled VAD). */

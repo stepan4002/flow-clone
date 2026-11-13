@@ -336,6 +336,7 @@ class VoiceInputIME : InputMethodService() {
 
         recording = true
         commitOnStop = true
+        RecognizerManager.sessionActive = true
         setRecordingUi(true)
         playCue(start = true)
         record.startRecording()
@@ -350,6 +351,8 @@ class VoiceInputIME : InputMethodService() {
                 setStatus(getString(R.string.status_listening))
                 launchStreamingSession(record, engine.recognizer)
             }
+        }.also { job ->
+            job.invokeOnCompletion { RecognizerManager.sessionActive = false }
         }
     }
 

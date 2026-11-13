@@ -18,7 +18,12 @@ import java.io.IOException
  */
 object ModelLocator {
 
-    data class WhisperModel(val encoder: String, val decoder: String, val tokens: String)
+    data class WhisperModel(
+        val encoder: String,
+        val decoder: String,
+        val tokens: String,
+        val variant: String = Prefs.VARIANT_BASE,
+    )
 
     data class ZipformerModel(
         val encoder: String,
@@ -32,6 +37,10 @@ object ModelLocator {
     fun whisperDir(context: Context): File = File(modelRoot(context), "whisper")
 
     fun zipformerDir(context: Context): File = File(modelRoot(context), "zipformer")
+
+    /** Downloaded Whisper small (see ModelDownloader); null when external storage is missing. */
+    fun whisperSmallDir(context: Context): File? =
+        context.getExternalFilesDir(null)?.let { File(File(it, "model"), "whisper-small") }
 
     /** Internal (never backed up) copy of assets/hotwords/: the BPE vocab + generated hotwords. */
     fun hotwordsDir(context: Context): File = File(context.filesDir, "hotwords")
@@ -61,7 +70,24 @@ object ModelLocator {
         false
     }
 
-    fun locateWhisper(context: Context): WhisperModel? {
+    /**
+     * The requested Whisper [variant] if present, otherwise the other one: a no-model APK with
+     * the downloaded small model works, and so does base after small was deleted.
+     */
+    fun locateWhisper(context: Context, variant: String = Prefs.VARIANT_BASE): WhisperModel? {
+        val small = whisperSmallDir(context)?.let { locateWhisperIn(it, Prefs.VARIANT_SMALL) }
+        val base = locateWhisperBase(context)
+        return if (variant == Prefs.VARIANT_SMALL) small ?: base else base ?: small
+    }
+
+    private fun locateWhisperIn(dir: File, variant: String): WhisperModel? {
+        val encoder = pick(dir, "encoder") ?: return null
+        val decoder = pick(dir, "decoder") ?: return null
+        val tokens = pickTokens(dir) ?: return null
+        return WhisperModel(encoder.absolutePath, decoder.absolutePath, tokens.absolutePath, variant)
+    }
+
+    private fun locateWhisperBase(context: Context): WhisperModel? {
         ensureAssetsCopied(context)
         for (dir in listOf(whisperDir(context), modelRoot(context))) {
             if (dir == modelRoot(context) && pick(dir, "joiner") != null) continue

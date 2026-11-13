@@ -60,6 +60,7 @@ class SetupActivity : AppCompatActivity() {
 
         setupSettings()
         setupUserLists()
+        setupDownload()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -90,6 +91,7 @@ class SetupActivity : AppCompatActivity() {
         }
         refreshStatuses()
         renderLists()
+        renderDownload(ModelDownloader.state.value)
     }
 
     // ------------------------------------------------------------- settings
@@ -271,10 +273,12 @@ class SetupActivity : AppCompatActivity() {
 
         binding.textModelStatus.text = when (state) {
             is RecognizerManager.State.Ready -> getString(
-                if (state.engine is RecognizerManager.Engine.Streaming)
-                    R.string.setup_model_ready_streaming
-                else
-                    R.string.setup_model_ready_whisper
+                when (val engine = state.engine) {
+                    is RecognizerManager.Engine.Streaming -> R.string.setup_model_ready_streaming
+                    is RecognizerManager.Engine.Whisper ->
+                        if (engine.variant == Prefs.VARIANT_SMALL) R.string.setup_model_ready_whisper_small
+                        else R.string.setup_model_ready_whisper
+                }
             )
             RecognizerManager.State.Loading,
             RecognizerManager.State.NotLoaded -> getString(R.string.status_loading)
@@ -300,6 +304,84 @@ class SetupActivity : AppCompatActivity() {
                 clipboard.setPrimaryClip(ClipData.newPlainText("model path", dir.absolutePath))
             }
             .show()
+    }
+
+    // ------------------------------------------------- optional model download
+
+    private fun setupDownload() {
+        binding.buttonDl.setOnClickListener { onDownloadButton() }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ModelDownloader.state.collect { renderDownload(it) }
+            }
+        }
+    }
+
+    private fun onDownloadButton() {
+        val state = ModelDownloader.state.value
+        when {
+            state is ModelDownloader.DlState.Running || state is ModelDownloader.DlState.Verifying ->
+                ModelDownloader.cancel()
+            ModelDownloader.isInstalled(this) -> AlertDialog.Builder(this)
+                .setMessage(R.string.setup_dl_delete_confirm)
+                .setPositiveButton(R.string.setup_dl_delete) { _, _ ->
+                    ModelDownloader.delete(this)
+                    renderDownload(ModelDownloader.state.value)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            else -> AlertDialog.Builder(this)
+                .setTitle(R.string.setup_dl_confirm_title)
+                .setMessage(R.string.setup_dl_confirm_message)
+                .setPositiveButton(R.string.setup_dl_download) { _, _ -> ModelDownloader.start(this) }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
+    /** Everything is derived from the files on disk + the live state, so it survives restarts. */
+    private fun renderDownload(state: ModelDownloader.DlState) {
+        val installed = ModelDownloader.isInstalled(this)
+        val busy = state is ModelDownloader.DlState.Running || state is ModelDownloader.DlState.Verifying
+        val partial = !installed && ModelDownloader.hasPartial(this)
+        val mb = { bytes: Long -> (bytes / 1_000_000).toInt() }
+
+        binding.progressDl.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.progressDl.isIndeterminate = state is ModelDownloader.DlState.Verifying
+        if (state is ModelDownloader.DlState.Running && state.total > 0) {
+            binding.progressDl.setProgressCompat((state.done * 1000 / state.total).toInt(), true)
+        }
+        binding.textDlStatus.text = when (state) {
+            is ModelDownloader.DlState.Running -> getString(R.string.setup_dl_running, mb(state.done), mb(state.total))
+            ModelDownloader.DlState.Verifying -> getString(R.string.setup_dl_verifying)
+            is ModelDownloader.DlState.Failed -> when (state.reason) {
+                ModelDownloader.Reason.STORAGE -> getString(R.string.dl_error_storage)
+                ModelDownloader.Reason.SPACE -> getString(R.string.dl_error_space, state.detail)
+                ModelDownloader.Reason.NETWORK -> getString(R.string.dl_error_network, state.detail)
+                ModelDownloader.Reason.CHECKSUM -> getString(R.string.dl_error_checksum, state.detail)
+            }
+            else -> when {
+                installed -> getString(R.string.setup_dl_installed, mb(ModelDownloader.TOTAL_BYTES))
+                partial -> getString(R.string.setup_dl_partial)
+                else -> getString(R.string.setup_dl_not_installed)
+            }
+        }
+        binding.buttonDl.setText(
+            when {
+                busy -> R.string.setup_dl_cancel
+                installed -> R.string.setup_dl_delete
+                partial || state is ModelDownloader.DlState.Failed -> R.string.setup_dl_resume
+                else -> R.string.setup_dl_download
+            }
+        )
+
+        binding.switchUseSmall.setOnCheckedChangeListener(null)
+        binding.switchUseSmall.isEnabled = installed && !busy
+        binding.switchUseSmall.isChecked = installed && Prefs.getWhisperVariant(this) == Prefs.VARIANT_SMALL
+        binding.switchUseSmall.setOnCheckedChangeListener { _, checked ->
+            Prefs.setWhisperVariant(this, if (checked) Prefs.VARIANT_SMALL else Prefs.VARIANT_BASE)
+            RecognizerManager.initialize(this, force = true)
+        }
     }
 
     // ----------------------------------------------------- dictionary lists

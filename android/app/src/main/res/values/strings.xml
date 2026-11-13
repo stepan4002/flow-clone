@@ -33,11 +33,12 @@
 
     <!-- Setup screen -->
     <string name="setup_headline">FlowKey setup</string>
-    <string name="setup_subtitle">A voice-only keyboard that works 100% offline. Four steps and you\'re dictating.</string>
+    <string name="setup_subtitle">A voice-only keyboard. Speech is recognized on the phone — no account, no cloud. Four steps and you\'re dictating.</string>
 
     <string name="setup_step_model">1. Speech model</string>
     <string name="setup_model_missing">Model files not found</string>
-    <string name="setup_model_ready_whisper">Whisper model loaded ✓ (EN · CS · FR · ES · auto)</string>
+    <string name="setup_model_ready_whisper">Whisper model loaded ✓ (99 languages + auto-detect)</string>
+    <string name="setup_model_ready_whisper_small">Higher-accuracy Whisper small loaded ✓ (99 languages + auto-detect)</string>
     <string name="setup_model_ready_streaming">Streaming Zipformer model loaded ✓ (English only)</string>
     <string name="setup_model_error">Engine failed to load: %1$s</string>
     <string name="setup_recheck">Re-check</string>
@@ -65,7 +66,7 @@
     <string name="setup_live_text_note_missing">Unavailable: this build has no voice detector (assets/vad/silero_vad.onnx).</string>
     <string name="streaming_crash_title">Streaming mode turned off</string>
     <string name="streaming_crash_message">The streaming model crashed FlowKey while loading, so FlowKey switched back to the Whisper engine. Dictation works normally. If you copied your own streaming model, check that it is the one listed in MODELS.md.</string>
-    <string name="setup_streaming_desc">Default engine is multilingual Whisper (EN, CS, FR, ES, auto-detect): speak, then it transcribes when you stop. Streaming mode shows words as you speak but is English-only and needs the Zipformer model.</string>
+    <string name="setup_streaming_desc">Default engine is multilingual Whisper (any language you add, plus auto-detect). English streaming mode uses a separate English-only engine that is the fastest, and boosts your words.</string>
 
     <string name="setup_test_title">Try it</string>
     <string name="setup_test_hint">Tap here, switch to FlowKey with the chooser, then dictate…</string>
@@ -77,6 +78,25 @@
 
     <string name="hotwords_crash_title">Word boosting turned off</string>
     <string name="hotwords_crash_message">The English streaming engine crashed while loading your words, so it now runs without them. Streaming itself stays on. Edit your words to try again.</string>
+    <string name="setup_dl_title">Extra: higher-accuracy model</string>
+    <string name="setup_dl_desc">Whisper small (~375 MB download, ~2–3× slower). Most useful for languages the built-in model handles less well. Optional — FlowKey works without it.</string>
+    <string name="setup_dl_download">Download</string>
+    <string name="setup_dl_cancel">Cancel</string>
+    <string name="setup_dl_delete">Delete</string>
+    <string name="setup_dl_resume">Resume download</string>
+    <string name="setup_dl_use_switch">Use the higher-accuracy model</string>
+    <string name="setup_dl_not_installed">Not downloaded.</string>
+    <string name="setup_dl_partial">Partly downloaded. Resume any time.</string>
+    <string name="setup_dl_running">Downloading… %1$d of %2$d MB. Keep this screen open.</string>
+    <string name="setup_dl_verifying">Checking the downloaded file…</string>
+    <string name="setup_dl_installed">Installed ✓ (%1$d MB)</string>
+    <string name="setup_dl_confirm_title">Download the higher-accuracy model?</string>
+    <string name="setup_dl_confirm_message">About 375 MB from huggingface.co. Use Wi-Fi and keep this screen open; an interrupted download resumes where it stopped. This is the only thing FlowKey ever downloads, and your audio never leaves the phone.</string>
+    <string name="setup_dl_delete_confirm">Delete the higher-accuracy model (~375 MB)? FlowKey goes back to the built-in model.</string>
+    <string name="dl_error_storage">Download failed: the phone storage is not available.</string>
+    <string name="dl_error_space">Download failed: not enough free space (needs %1$s).</string>
+    <string name="dl_error_network">Download failed (%1$s). Check the connection and tap Resume.</string>
+    <string name="dl_error_checksum">The downloaded file was damaged (%1$s) and was deleted. Tap Download to try again.</string>
     <string name="setup_words_title">Your words</string>
     <string name="setup_words_desc">Names, brands and jargon. FlowKey fixes their spelling in what you dictate, and the English streaming engine listens for them.</string>
     <string name="setup_word_hint">e.g. Kubernetes</string>
@@ -116,6 +136,6 @@
     <!-- Model instructions dialog -->
     <string name="model_help_title">Install the speech model</string>
     <string name="model_help_copy_path">Copy path</string>
-    <string name="model_help_whisper">FlowKey needs the multilingual Whisper model (all four files):\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2\n(or sherpa-onnx-whisper-small.tar.bz2 for better quality — do NOT use a \".en\" variant)\n\n2. Extract it and copy these three files:\n• *-encoder.int8.onnx\n• *-decoder.int8.onnx\n• *-tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
+    <string name="model_help_whisper">FlowKey needs the multilingual Whisper model (all four files):\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2\n(for better quality, use \"Extra: higher-accuracy model\" in Setup instead — do NOT use a \".en\" variant)\n\n2. Extract it and copy these three files:\n• *-encoder.int8.onnx\n• *-decoder.int8.onnx\n• *-tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
     <string name="model_help_zipformer">Streaming mode needs the English streaming Zipformer model:\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2\n\n2. Extract and copy these four files:\n• encoder-*.int8.onnx\n• decoder-*.onnx\n• joiner-*.int8.onnx\n• tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
 </resources>
