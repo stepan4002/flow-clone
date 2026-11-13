@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Downloads the large build inputs that are NOT stored in git:
 #   - the sherpa-onnx Android AAR       -> app/libs/          (required to build)
+#   - the Silero voice activity detector  -> app/src/main/assets/vad/ (live text; ~0.6 MB)
 #   - the multilingual Whisper base model -> app/src/main/assets/model/whisper/
 #   - the English streaming Zipformer     -> app/src/main/assets/model/zipformer/
 #     (both optional: only with --model, to build an APK that ships with the models)
 #
 # Usage (Linux, macOS, or Git Bash on Windows), from the android/ folder:
-#   ./fetch-deps.sh            # AAR only
-#   ./fetch-deps.sh --model    # AAR + bundled models
+#   ./fetch-deps.sh            # AAR + VAD
+#   ./fetch-deps.sh --model    # AAR + VAD + bundled speech models
 set -euo pipefail
 
 SHERPA_VERSION="1.12.14"
@@ -20,6 +21,16 @@ if [ ! -f "$aar" ]; then
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/sherpa-onnx-${SHERPA_VERSION}.aar"
 else
   echo "==> $aar already present"
+fi
+
+vad="app/src/main/assets/vad/silero_vad.onnx"
+if [ ! -f "$vad" ]; then
+  echo "==> Downloading Silero VAD (live text)"
+  mkdir -p "$(dirname "$vad")"
+  curl -fL --retry 3 -o "$vad" \
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+else
+  echo "==> $vad already present"
 fi
 
 if [ "${1:-}" = "--model" ]; then

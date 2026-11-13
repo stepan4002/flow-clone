@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_PUNCTUATION_COMMANDS = "punctuation_commands_enabled"
     private const val KEY_FILLER_REMOVAL = "filler_removal_enabled"
     private const val KEY_WORD_CORRECTION = "word_correction_enabled"
+    private const val KEY_LIVE_TEXT = "live_text_enabled"
 
     /**
      * Crash-guard flags live in their own file, which is excluded from backup and device
@@ -242,6 +243,14 @@ object Prefs {
 
     fun setFillerRemovalEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_FILLER_REMOVAL, enabled).apply()
+    }
+
+    /** Whisper live text: words appear while speaking (needs the bundled VAD). */
+    fun isLiveTextEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LIVE_TEXT, true)
+
+    fun setLiveTextEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LIVE_TEXT, enabled).apply()
     }
 
     /** Auto-correct close misspellings of the user's words (exact casing is always applied). */

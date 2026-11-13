@@ -13,6 +13,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -25,6 +26,9 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
+import com.k2fsa.sherpa.onnx.SileroVadModelConfig
+import com.k2fsa.sherpa.onnx.Vad
+import com.k2fsa.sherpa.onnx.VadModelConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +36,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,9 +44,10 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * Voice-only input method. Default flow (Whisper offline engine):
- * tap mic -> record (pulsing UI, "..." composing placeholder) -> tap again or
- * auto-stop on trailing silence -> transcribe on-device -> cleaned text committed.
+ * Voice-only input method. Default flow (Whisper offline engine, any language):
+ * tap mic -> record -> words appear live (VAD phrases decoded as you speak) -> tap again or
+ * auto-stop on trailing silence -> cleaned text committed. With live text off (or no VAD
+ * bundled) the whole take is transcribed once after it ends.
  *
  * Optional "English streaming mode" (Zipformer online engine): live partial
  * results stream into the field as composing text; endpoint detection commits
@@ -56,6 +62,9 @@ class VoiceInputIME : InputMethodService() {
         const val SILENCE_RMS = 0.012f            // normalized RMS below this counts as silence
         const val NO_SPEECH_TIMEOUT_MS = 8000L    // give up if nothing was ever said
         const val MAX_TAKE_MS = 60_000L           // hard cap per Whisper take (~3.7 MB audio)
+        const val VAD_ASSET_NAME = "silero_vad.onnx"
+        const val PRE_ROLL_SAMPLES = SAMPLE_RATE / 2L  // audio kept before a detected onset
+        const val HISTORY_SAMPLES = SAMPLE_RATE * 40L  // rolling audio kept for phrase decodes
         const val BACKSPACE_FIRST_DELAY_MS = 400L
         const val BACKSPACE_REPEAT_MS = 50L
     }
@@ -67,6 +76,7 @@ class VoiceInputIME : InputMethodService() {
         val removeFillers: Boolean,
         val punctuationCommands: Boolean,
         val correctWords: Boolean,
+        val liveText: Boolean,
         /** Prefs language for this session ("auto" or a code); "en" in streaming mode. */
         val language: String,
     )
@@ -100,11 +110,18 @@ class VoiceInputIME : InputMethodService() {
         removeFillers = true,
         punctuationCommands = true,
         correctWords = true,
+        liveText = true,
         language = "en",
     )
 
     /** Auto mode: the language Whisper detected first in this session (sticky). */
     private var sessionLang: String? = null
+
+    /** True while the running session is a live Whisper session. */
+    private var liveSession = false
+
+    /** The text field a session started in; text is never committed into another one. */
+    private var sessionField: Pair<String?, Int>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -154,7 +171,14 @@ class VoiceInputIME : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
-        stopDictation(commitPending = true)
+        if (sessionJob?.isActive == true && liveSession) {
+            // Live session: keep what is already shown in THIS field and drop pending audio,
+            // instead of committing later into whatever field gets focus next.
+            currentInputConnection?.finishComposingText()
+            stopDictation(commitPending = false)
+        } else {
+            stopDictation(commitPending = true)
+        }
         stateJob?.cancel()
         super.onFinishInputView(finishingInput)
     }
@@ -298,9 +322,11 @@ class VoiceInputIME : InputMethodService() {
             removeFillers = Prefs.isFillerRemovalEnabled(this),
             punctuationCommands = Prefs.isPunctuationCommandsEnabled(this),
             correctWords = Prefs.isWordCorrectionEnabled(this),
+            liveText = Prefs.isLiveTextEnabled(this),
             language = if (Prefs.isStreamingMode(this)) "en" else Prefs.getLanguage(this),
         )
         sessionLang = null
+        sessionField = currentInputEditorInfo?.let { it.packageName to it.fieldId }
 
         val record = createAudioRecord()
         if (record == null) {
@@ -320,6 +346,7 @@ class VoiceInputIME : InputMethodService() {
                 launchWhisperSession(record, engine.recognizer)
             }
             is RecognizerManager.Engine.Streaming -> {
+                liveSession = false
                 setStatus(getString(R.string.status_listening))
                 launchStreamingSession(record, engine.recognizer)
             }
@@ -362,8 +389,24 @@ class VoiceInputIME : InputMethodService() {
         return record
     }
 
-    /** Default engine: record the whole take, then transcribe once. */
-    private fun launchWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job =
+    /** Default engine: live text when the VAD is bundled and enabled, else one batch decode. */
+    private fun launchWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job {
+        liveSession = options.liveText && vadAvailable()
+        return if (liveSession) {
+            launchLiveWhisperSession(record, recognizer)
+        } else {
+            launchBatchWhisperSession(record, recognizer)
+        }
+    }
+
+    private fun vadAvailable(): Boolean = try {
+        assets.list("vad")?.contains(VAD_ASSET_NAME) == true
+    } catch (e: java.io.IOException) {
+        false
+    }
+
+    /** Record the whole take, then transcribe once (in <=28 s chunks, see [WhisperChunks]). */
+    private fun launchBatchWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job =
         mainScope.launch(Dispatchers.Default) {
             val opts = options
             val chunks = ArrayList<FloatArray>()
@@ -427,20 +470,7 @@ class VoiceInputIME : InputMethodService() {
                 setStatus(getString(R.string.status_transcribing))
             }
             val result = try {
-                val all = FloatArray(chunks.sumOf { it.size })
-                var pos = 0
-                for (c in chunks) {
-                    c.copyInto(all, pos)
-                    pos += c.size
-                }
-                val stream = recognizer.createStream()
-                try {
-                    stream.acceptWaveform(all, SAMPLE_RATE)
-                    recognizer.decode(stream)
-                    recognizer.getResult(stream)
-                } finally {
-                    stream.release()
-                }
+                WhisperChunks.decodeAll(recognizer, WhisperChunks.concat(chunks))
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 Log.e(TAG, "Whisper transcription failed", t)
@@ -457,6 +487,236 @@ class VoiceInputIME : InputMethodService() {
                 refreshIdleStatus()
             }
         }
+
+    private fun newVad(): Vad = Vad(
+        assetManager = assets,
+        config = VadModelConfig(
+            sileroVadModelConfig = SileroVadModelConfig(
+                model = "vad/$VAD_ASSET_NAME",
+                threshold = 0.5f,
+                // A full second of silence ends a phrase, so phrases follow sentence pauses.
+                minSilenceDuration = 1.0f,
+                minSpeechDuration = 0.25f,
+                windowSize = 512,
+                // Not a hard cut (sherpa only tightens thresholds); decodes are chunked anyway.
+                maxSpeechDuration = 20f,
+            ),
+            sampleRate = SAMPLE_RATE,
+            numThreads = 1,
+        ),
+    )
+
+    /**
+     * Live text with Whisper, in any language. The microphone is read by a producer coroutine
+     * into an unbounded channel, so audio is never lost while Whisper decodes. The consumer
+     * feeds the Silero VAD; each finished phrase is decoded and appended to the session's raw
+     * text, and the in-progress phrase is re-decoded now and then as a partial.
+     *
+     * The WHOLE session is shown as composing text (cleaned again on every update) and
+     * committed once when the session ends: "scratch that" keeps working across pauses,
+     * spacing stays right, and history gets one entry. Past [LivePolicy.MAX_COMPOSING_CHARS]
+     * the text is committed early at a phrase boundary.
+     */
+    private fun launchLiveWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job =
+        mainScope.launch(Dispatchers.Default) {
+            val opts = options
+            val audio = Channel<FloatArray>(Channel.UNLIMITED)
+            val producer = launch(Dispatchers.IO) {
+                val buffer = ShortArray(CHUNK)
+                try {
+                    while (recording && isActive) {
+                        val n = record.read(buffer, 0, buffer.size)
+                        if (n < 0) {
+                            Log.w(TAG, "AudioRecord.read returned $n")
+                            break
+                        }
+                        if (n == 0) continue
+                        audio.send(FloatArray(n) { buffer[it] / 32768.0f })
+                    }
+                } finally {
+                    try {
+                        record.stop()
+                    } catch (e: IllegalStateException) {
+                        Log.w(TAG, "AudioRecord.stop failed", e)
+                    }
+                    record.release()
+                    audio.close()
+                }
+            }
+
+            val vad = try {
+                newVad()
+            } catch (t: Throwable) {
+                Log.e(TAG, "VAD failed to load", t)
+                recording = false
+                producer.cancel()
+                withContext(NonCancellable + Dispatchers.Main) {
+                    setRecordingUi(false)
+                    clearPlaceholder()
+                    setStatus(getString(R.string.status_engine_error, t.message ?: "VAD"))
+                }
+                return@launch
+            }
+
+            val sessionRaw = StringBuilder()
+            val history = AudioHistory(HISTORY_SAMPLES)
+            var onset: Long? = null      // absolute sample where the current phrase started
+            var lastPhraseEnd = 0L       // never decode audio twice (no repeated words)
+            var heardVoice = false
+            var autoStopped = false
+            var stopHandled = false
+            var sinceVoice = 0L
+            var sinceLastPartial = 0L
+            var lastDecodeMs = 0L
+
+            /** Audio of a phrase, padded in front: Silero reports speech onsets ~0.5 s late. */
+            fun phraseAudio(from: Long, to: Long): FloatArray =
+                history.slice(maxOf(from - PRE_ROLL_SAMPLES, lastPhraseEnd), to)
+
+            suspend fun finishPhrases() {
+                while (!vad.empty()) {
+                    val segment = vad.front()
+                    vad.pop()
+                    val segStart = segment.start.toLong()
+                    val segEnd = segStart + segment.samples.size
+                    val result = WhisperChunks.decodeAll(recognizer, phraseAudio(segStart, segEnd))
+                    lastPhraseEnd = maxOf(lastPhraseEnd, segEnd)
+                    onset = null
+                    if (result.text.isNotBlank()) {
+                        if (sessionRaw.isNotEmpty()) sessionRaw.append(' ')
+                        sessionRaw.append(result.text)
+                    }
+                    withContext(Dispatchers.Main) {
+                        commandLanguage(result.lang) // fixes the auto-mode language once known
+                        if (sessionRaw.length >= LivePolicy.MAX_COMPOSING_CHARS) {
+                            commitSegment(sessionRaw.toString())
+                            sessionRaw.setLength(0)
+                            showPlaceholder()
+                        } else {
+                            renderLive(sessionRaw, "")
+                        }
+                    }
+                }
+            }
+
+            try {
+                withContext(Dispatchers.Main) { showPlaceholder() }
+                for (chunk in audio) {
+                    history.add(chunk)
+                    vad.acceptWaveform(chunk)
+                    sinceVoice += chunk.size
+                    sinceLastPartial += chunk.size
+
+                    if (vad.isSpeechDetected()) {
+                        heardVoice = true
+                        sinceVoice = 0
+                        if (onset == null) onset = history.end - chunk.size
+                    }
+
+                    // Partials only while still listening; after stop, finish quickly.
+                    val phraseStart = onset
+                    if (recording && phraseStart != null &&
+                        LivePolicy.ms(history.end - phraseStart) >= LivePolicy.MIN_PARTIAL_SPEECH_MS &&
+                        LivePolicy.partialDue(sinceLastPartial, lastDecodeMs)
+                    ) {
+                        val from = maxOf(phraseStart, history.end - WhisperChunks.MAX_SAMPLES + PRE_ROLL_SAMPLES)
+                        val t0 = SystemClock.elapsedRealtime()
+                        val partial = WhisperChunks.decodeAll(recognizer, phraseAudio(from, history.end)).text
+                        lastDecodeMs = SystemClock.elapsedRealtime() - t0
+                        sinceLastPartial = 0
+                        withContext(Dispatchers.Main) { renderLive(sessionRaw, partial) }
+                    }
+
+                    finishPhrases()
+
+                    if (recording) {
+                        val stop = (opts.autoStop &&
+                            (LivePolicy.autoStop(heardVoice, sinceVoice, opts.autoStopMs) ||
+                                LivePolicy.noSpeech(heardVoice, history.end))) ||
+                            LivePolicy.maxTake(history.end)
+                        if (stop) {
+                            autoStopped = true
+                            recording = false // the producer ends and closes the channel
+                        }
+                    }
+                    if (!recording && !stopHandled) {
+                        stopHandled = true
+                        withContext(Dispatchers.Main) {
+                            if (autoStopped) playCue(start = false)
+                            setRecordingUi(false)
+                            transcribing = true
+                            setStatus(getString(R.string.status_transcribing))
+                        }
+                    }
+                }
+
+                // Microphone closed and every queued chunk processed: finish the last phrase.
+                vad.flush()
+                finishPhrases()
+                val pending = onset
+                if (pending != null &&
+                    LivePolicy.ms(history.end - pending) >= LivePolicy.MIN_PARTIAL_SPEECH_MS
+                ) {
+                    val text = WhisperChunks.decodeAll(recognizer, phraseAudio(pending, history.end)).text
+                    if (text.isNotBlank()) {
+                        if (sessionRaw.isNotEmpty()) sessionRaw.append(' ')
+                        sessionRaw.append(text)
+                    }
+                }
+
+                val shouldCommit = commitOnStop
+                withContext(NonCancellable + Dispatchers.Main) {
+                    if (!stopHandled) {
+                        // The microphone ended on its own (read error): stop like a tap would.
+                        recording = false
+                        setRecordingUi(false)
+                    }
+                    transcribing = false
+                    when {
+                        shouldCommit && sessionRaw.isNotBlank() -> commitSegment(sessionRaw.toString())
+                        shouldCommit && !heardVoice -> {
+                            clearPlaceholder()
+                            setStatus(getString(R.string.status_no_speech))
+                        }
+                        else -> clearPlaceholder()
+                    }
+                    refreshIdleStatus()
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                Log.e(TAG, "Live transcription failed", t)
+                recording = false
+                withContext(NonCancellable + Dispatchers.Main) {
+                    transcribing = false
+                    setRecordingUi(false)
+                    clearPlaceholder()
+                    setStatus(getString(R.string.status_engine_error, t.message ?: ""))
+                }
+            } finally {
+                producer.cancel()
+                vad.release()
+                withContext(NonCancellable + Dispatchers.Main) {
+                    if (transcribing || recording) {
+                        // Cancelled (field closed, keyboard destroyed): reset the UI.
+                        recording = false
+                        transcribing = false
+                        setRecordingUi(false)
+                        refreshIdleStatus()
+                    }
+                }
+            }
+        }
+
+    /** Shows the whole live session (cleaned) plus the current partial as composing text. */
+    private fun renderLive(sessionRaw: CharSequence, partial: String) {
+        if (!inSessionField()) return
+        val ic = currentInputConnection ?: return
+        val raw = listOf(sessionRaw.toString(), partial).filter { it.isNotBlank() }.joinToString(" ")
+        val shown = if (raw.isBlank()) "" else clean(raw, null)
+        val prefix = if (needLeadingSpace) " " else ""
+        ic.setComposingText(prefix + shown.ifEmpty { "…" }, 1)
+        setStatus(partial.ifBlank { getString(R.string.status_listening_tap) })
+    }
 
     /** Optional engine: streaming partials + endpoint-based hands-free segments. */
     private fun launchStreamingSession(record: AudioRecord, recognizer: OnlineRecognizer): Job =
@@ -547,19 +807,34 @@ class VoiceInputIME : InputMethodService() {
         return sessionLang
     }
 
+    private fun clean(raw: String, detectedLang: String?): String = TextCleanup.process(
+        raw,
+        capitalizeNext,
+        dictionary,
+        snippets,
+        removeFillers = options.removeFillers,
+        punctuationCommands = options.punctuationCommands,
+        commandLanguage = commandLanguage(detectedLang),
+        words = userTerms,
+        correctWords = options.correctWords,
+    )
+
+    /** True while the focused field is the one the current session started in. */
+    private fun inSessionField(): Boolean {
+        val field = sessionField ?: return true
+        val now = currentInputEditorInfo ?: return false
+        return now.packageName == field.first && now.fieldId == field.second
+    }
+
     private fun commitSegment(raw: String, detectedLang: String? = null) {
-        val ic = currentInputConnection ?: return
-        val cleaned = TextCleanup.process(
-            raw,
-            capitalizeNext,
-            dictionary,
-            snippets,
-            removeFillers = options.removeFillers,
-            punctuationCommands = options.punctuationCommands,
-            commandLanguage = commandLanguage(detectedLang),
-            words = userTerms,
-            correctWords = options.correctWords,
-        )
+        val cleaned = clean(raw, detectedLang)
+        val ic = currentInputConnection
+        if (ic == null || !inSessionField()) {
+            // Focus moved on: never type into another field, but keep the text in history.
+            Log.w(TAG, "Input field changed or closed; transcript kept in history only")
+            if (cleaned.isNotEmpty()) HistoryStore.add(this, cleaned)
+            return
+        }
         if (cleaned.isEmpty()) {
             ic.commitText("", 1)
             return

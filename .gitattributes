@@ -9,6 +9,9 @@
 *.sh   text eol=lf
 gradlew text eol=lf
 
+# Read byte-for-byte by sherpa-onnx inside the APK
+*.vocab text eol=lf
+
 *.jar binary
 *.png binary
 *.gif binary

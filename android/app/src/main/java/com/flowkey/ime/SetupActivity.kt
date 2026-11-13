@@ -149,6 +149,12 @@ class SetupActivity : AppCompatActivity() {
 
         binding.switchStreaming.isChecked = Prefs.isStreamingMode(this)
         setupStreamingSwitchListener()
+
+        binding.switchLiveText.isChecked = Prefs.isLiveTextEnabled(this)
+        binding.switchLiveText.setOnCheckedChangeListener { _, checked ->
+            Prefs.setLiveTextEnabled(this, checked)
+        }
+        refreshLiveTextSwitch()
     }
 
     /**
@@ -184,6 +190,24 @@ class SetupActivity : AppCompatActivity() {
             RecognizerManager.initialize(this, force = true)
             refreshStatuses()
         }
+    }
+
+    /** Live text is a Whisper feature and needs the bundled voice detector. */
+    private fun refreshLiveTextSwitch() {
+        val vad = try {
+            assets.list("vad")?.contains("silero_vad.onnx") == true
+        } catch (_: java.io.IOException) {
+            false
+        }
+        val streaming = Prefs.isStreamingMode(this)
+        binding.switchLiveText.isEnabled = vad && !streaming
+        binding.textLiveTextNote.setText(
+            when {
+                !vad -> R.string.setup_live_text_note_missing
+                streaming -> R.string.setup_live_text_note_streaming
+                else -> R.string.setup_live_text_note
+            }
+        )
     }
 
     private fun setupUserLists() {
@@ -237,6 +261,7 @@ class SetupActivity : AppCompatActivity() {
         )
 
         updateModelStatus(RecognizerManager.state.value)
+        refreshLiveTextSwitch()
     }
 
     private fun updateModelStatus(state: RecognizerManager.State) {

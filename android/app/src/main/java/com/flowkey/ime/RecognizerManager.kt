@@ -253,6 +253,10 @@ object RecognizerManager {
                 decoder = model.decoder,
                 language = language, // "" = per-utterance auto-detect
                 task = "transcribe",
+                // Zero padding after the audio, in frames. sherpa's default (1000 = 10 s) makes
+                // every short phrase cost a 10 s+ encoder pass. 500 measured as accurate as 1000
+                // (300 misheard a word) and nearly as fast as 300.
+                tailPaddings = 500,
             ),
             tokens = model.tokens,
             numThreads = 2,
