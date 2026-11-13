@@ -1,0 +1,16 @@
+# Core (all local, all free)
+onnx-asr[cpu,hub]     # Parakeet-TDT-0.6B-v3 engine (default) — auto-downloads model from HuggingFace
+sounddevice           # microphone capture
+numpy
+keyboard              # global push-to-talk hotkey (low-level hook, no admin needed)
+pyperclip             # clipboard save/set/restore
+pystray               # system tray icon
+Pillow                # tray icon rendering
+psutil                # foreground-app detection (tone matching)
+pywin32               # foreground window handle
+requests              # optional Ollama cleanup calls
+truststore            # use Windows cert store for TLS (proxy/AV-friendly downloads)
+
+# Optional multilingual engine (90+ languages). Comment out if you only need
+# English/European languages — Parakeet covers those better and faster.
+faster-whisper

@@ -1,0 +1,12 @@
+The sherpa-onnx Android AAR goes in this folder (it is not stored in git).
+
+Easiest: from the android/ folder run   ./fetch-deps.sh
+
+Manual:
+1. Open https://github.com/k2-fsa/sherpa-onnx/releases
+2. Under "Assets", download sherpa-onnx-1.12.14.aar (or a newer 1.12.x)
+3. Copy it into this folder (app/libs/)
+4. In Android Studio: File > Sync Project with Gradle Files
+
+The build picks up any *.aar in this folder automatically.
+See ../../README.md and ../../MODELS.md for full instructions.

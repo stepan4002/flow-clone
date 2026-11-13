@@ -1,0 +1,36 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows (FlowClone)
+        - Android (FlowKey)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: "Windows: Windows + Python version and engine (parakeet/whisper). Android: phone model + Android version."
+  - type: dropdown
+    id: language
+    attributes:
+      label: Dictation language
+      options: [English, Czech, French, Spanish, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Windows: %APPDATA%\\FlowClone\\logs\\flowclone.log (remove anything private first; it can contain your transcripts)."
+      render: text

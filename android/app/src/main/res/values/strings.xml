@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FlowKey — Local Voice Keyboard</string>
+    <string name="ime_name">FlowKey</string>
+    <string name="subtype_label">FlowKey Voice</string>
+    <string name="space_label">space</string>
+
+    <!-- Keyboard status line -->
+    <string name="status_idle">Tap the mic and speak</string>
+    <string name="status_loading">Loading model…</string>
+    <string name="status_no_model">Model files missing — open setup</string>
+    <string name="status_no_permission">Grant microphone in setup</string>
+    <string name="status_engine_error">Engine error: %1$s</string>
+    <string name="status_listening">Listening…</string>
+    <string name="status_listening_tap">Listening… (tap mic to finish)</string>
+    <string name="status_transcribing">Transcribing…</string>
+    <string name="status_no_speech">Didn\'t hear anything</string>
+    <string name="status_audio_error">Microphone unavailable</string>
+    <string name="status_streaming_en_only">Streaming mode is English-only</string>
+    <string name="status_language_set">Language: %1$s</string>
+
+    <string name="action_open_setup">Open setup</string>
+    <string name="lang_auto">AUTO</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_mic">Start or stop dictation</string>
+    <string name="cd_backspace">Backspace</string>
+    <string name="cd_enter">Enter</string>
+    <string name="cd_globe">Switch keyboard</string>
+    <string name="cd_settings">Open FlowKey setup</string>
+    <string name="cd_language">Dictation language</string>
+
+    <!-- Setup screen -->
+    <string name="setup_headline">FlowKey setup</string>
+    <string name="setup_subtitle">A voice-only keyboard that works 100% offline. Four steps and you\'re dictating.</string>
+
+    <string name="setup_step_model">1. Speech model</string>
+    <string name="setup_model_missing">Model files not found</string>
+    <string name="setup_model_ready_whisper">Whisper model loaded ✓ (EN · CS · FR · ES · auto)</string>
+    <string name="setup_model_ready_streaming">Streaming Zipformer model loaded ✓ (English only)</string>
+    <string name="setup_model_error">Engine failed to load: %1$s</string>
+    <string name="setup_recheck">Re-check</string>
+    <string name="setup_instructions">Instructions</string>
+
+    <string name="setup_step_mic">2. Microphone permission</string>
+    <string name="setup_mic_granted">Microphone access granted ✓</string>
+    <string name="setup_mic_missing">Microphone access is required for dictation</string>
+    <string name="setup_grant_mic">Grant microphone</string>
+
+    <string name="setup_step_enable">3. Enable the FlowKey keyboard</string>
+    <string name="setup_ime_enabled">FlowKey is enabled ✓</string>
+    <string name="setup_ime_disabled">FlowKey is not enabled yet — turn it on in system settings</string>
+    <string name="setup_open_settings">Open keyboard settings</string>
+
+    <string name="setup_step_switch">4. Switch to FlowKey</string>
+    <string name="setup_switch_desc">Pick FlowKey in the keyboard chooser. You can switch back any time with the globe key.</string>
+    <string name="setup_switch_keyboard">Show keyboard chooser</string>
+
+    <string name="setup_engine_title">Engine</string>
+    <string name="setup_streaming_switch">English streaming mode (live partial text)</string>
+    <string name="setup_streaming_desc">Default engine is multilingual Whisper (EN, CS, FR, ES, auto-detect): speak, then it transcribes when you stop. Streaming mode shows words as you speak but is English-only and needs the Zipformer model.</string>
+
+    <string name="setup_test_title">Try it</string>
+    <string name="setup_test_hint">Tap here, switch to FlowKey with the chooser, then dictate…</string>
+
+    <string name="setup_dictionary_title">Dictionary</string>
+    <string name="setup_dictionary_desc">Always replace a misheard word with your correction.</string>
+    <string name="setup_from_hint">Wrong word</string>
+    <string name="setup_to_hint">Correct word</string>
+
+    <string name="setup_snippets_title">Snippets</string>
+    <string name="setup_snippets_desc">Say a trigger phrase to insert a longer text.</string>
+    <string name="setup_trigger_hint">Trigger phrase</string>
+    <string name="setup_expansion_hint">Expanded text</string>
+
+    <string name="setup_add">Add</string>
+    <string name="setup_list_empty">No entries yet.</string>
+    <string name="setup_list_entry">%1$s  →  %2$s</string>
+    <string name="setup_list_remove">Remove</string>
+
+    <!-- Dictation settings -->
+    <string name="setup_settings_title">Dictation settings</string>
+    <string name="setup_language_label">Default language</string>
+    <string name="setup_auto_stop_switch">Auto-stop after silence</string>
+    <string name="setup_auto_stop_duration">Silence duration before auto-stop</string>
+    <string name="setup_haptics_switch">Haptic feedback</string>
+    <string name="setup_sound_switch">Start/stop sound cue</string>
+    <string name="setup_punctuation_switch">Spoken punctuation commands (English)</string>
+    <string name="setup_fillers_switch">Remove filler words (um, uh, euh…)</string>
+
+    <!-- History -->
+    <string name="setup_history_title">History</string>
+    <string name="setup_history_desc">Your last 50 transcripts, stored only on this device.</string>
+    <string name="setup_open_history">Open dictation history</string>
+    <string name="history_title">Dictation history</string>
+    <string name="history_empty">No dictations yet.</string>
+    <string name="history_copied">Copied to clipboard</string>
+    <string name="history_clear">Clear all</string>
+    <string name="history_tap_hint">Tap an entry to copy it.</string>
+
+    <!-- Model instructions dialog -->
+    <string name="model_help_title">Install the speech model</string>
+    <string name="model_help_copy_path">Copy path</string>
+    <string name="model_help_whisper">FlowKey needs the multilingual Whisper model (all four files):\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2\n(or sherpa-onnx-whisper-small.tar.bz2 for better quality — do NOT use a \".en\" variant)\n\n2. Extract it and copy these three files:\n• *-encoder.int8.onnx\n• *-decoder.int8.onnx\n• *-tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
+    <string name="model_help_zipformer">Streaming mode needs the English streaming Zipformer model:\n\n1. On a computer, download:\nhttps://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2\n\n2. Extract and copy these four files:\n• encoder-*.int8.onnx\n• decoder-*.onnx\n• joiner-*.int8.onnx\n• tokens.txt\n\n3. Connect the phone via USB and place them in:\n%1$s\n\n4. Come back and tap Re-check.\n\nFull details: MODELS.md in the project folder.</string>
+</resources>

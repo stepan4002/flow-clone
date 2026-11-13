@@ -1,0 +1,14 @@
+* text=auto
+
+# Windows scripts must be CRLF to run reliably
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Unix scripts must be LF
+*.sh   text eol=lf
+gradlew text eol=lf
+
+*.jar binary
+*.png binary
+*.gif binary

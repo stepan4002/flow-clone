@@ -1,0 +1,44 @@
+# ---------- Python (windows/) ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+windows/build/
+windows/dist/
+*.spec
+
+# ---------- Android (android/) ----------
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+.idea/
+*.iml
+captures/
+.cxx/
+.externalNativeBuild/
+
+# ---------- Signing material: never commit ----------
+keystore.properties
+*.jks
+*.keystore
+
+# ---------- Large binaries: shipped via GitHub Releases, fetched by scripts ----------
+*.apk
+*.aab
+*.aar
+*.onnx
+android/app/src/main/assets/model/
+android/releases/
+
+# ---------- Secrets / local env ----------
+.env
+.env.*
+
+# ---------- OS / editor ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
