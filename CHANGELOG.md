@@ -3,6 +3,31 @@
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/);
 versioning: [SemVer](https://semver.org/).
 
+## [1.3.0] — unreleased
+
+### Windows — FlowClone
+- Standalone **FlowClone-Setup.exe**: no Python needed, per-user install without admin
+  rights, Start-menu entry, optional autostart, clean uninstall that asks before removing
+  settings or the speech model
+- Speech model download is resumable, pinned to one model version and SHA-256-verified,
+  with progress on the status pill and tray tooltip; an existing Hugging Face cache copy is
+  reused without extra disk space; tray → *Retry speech model download*
+- Pressing the hotkey while the model is still downloading says so instead of recording
+- Starting FlowClone again opens the running copy's Hub instead of silently doing nothing
+- Crashes in any thread are written to `logs\flowclone.log` / `logs\crash.log`
+- `install.ps1` no longer removes or overwrites anything that belongs to an exe install
+
+### Windows — FlowClone — fixes
+- The model download no longer crashes on PCs with AVG/Avast web protection
+  (their `SSLKEYLOGFILE` made Python's OpenSSL abort)
+- Autostart now points at the right program after moving between script and exe installs
+- "Open history file" works on a fresh install
+- The speech model size is ~670 MB (was documented as ~330 MB)
+
+### Project
+- `windows-release.yml` builds, self-tests and attaches the installer for version tags;
+  release checklist in `RELEASING.md`
+
 ## [1.2.0] — 2026-11-13
 
 ### Android — FlowKey

@@ -23,13 +23,21 @@
 
 ## ⚡ Install in one line
 
-**Windows 10/11** — open PowerShell and paste:
+**Windows 10/11** — download and run
+**[FlowClone-Setup.exe](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowClone-Setup.exe)**
+(~45 MB, no admin rights, no Python needed). Then hold **Ctrl + Win**, speak, release.
+The first start downloads the speech model once (~670 MB, with progress shown at the bottom
+of the screen).
+
+<sub>The installer isn't code-signed yet, so Windows may say *“Windows protected your PC”*:
+click **More info → Run anyway**. You can check the download against the
+`FlowClone-Setup.exe.sha256` file published with each release.</sub>
+
+Prefer a script? Open PowerShell and paste:
 
 ```powershell
 irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | iex
 ```
-
-Then hold **Ctrl + Win**, speak, release. (First start downloads the ~330 MB speech model once.)
 
 **Android 8+** — open this link on your phone and install:
 **[FlowKey.apk](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowKey.apk)** (speech models included, ~270 MB)
@@ -56,7 +64,7 @@ Then hold **Ctrl + Win**, speak, release. (First start downloads the ~330 MB spe
 
 - Audio is recorded, transcribed and cleaned **on your device**. There is no server, no telemetry, no analytics.
 - Android: speech is recognized entirely on the phone; audio never leaves it. The `INTERNET` permission is used for one thing only — the optional higher-accuracy model, downloaded from Hugging Face when *you* tap Download in Setup (fixed HTTPS URLs, checksum-verified). No analytics, no accounts.
-- Windows: the only network calls are the one-time model download from Hugging Face and — only if you enable it — `localhost` calls to your own Ollama.
+- Windows: the only network calls are the one-time speech-model download from Hugging Face (pinned to an exact model version and checked with SHA-256, saved in `%LOCALAPPDATA%\FlowClone\models`) and — only if you enable it — `localhost` calls to your own Ollama.
 - Your settings, dictionary and history stay in `%APPDATA%\FlowClone` (Windows) or the app's private storage (Android).
 
 ## 🧠 How it works
@@ -103,6 +111,10 @@ pip install -r requirements.txt
 python run.py
 ```
 
+To build `FlowClone.exe` and the installer: Python 3.12, `pip install -r requirements-build.txt`,
+then `build_exe.bat` and `build_installer.bat` (Inno Setup 6). Releases: see
+[RELEASING.md](RELEASING.md).
+
 **Android** (JDK 17+, Android SDK):
 
 ```bash
@@ -115,20 +127,26 @@ Run the tests with `python -m pytest windows/tests`.
 
 ## Uninstall
 
-**Windows:**
+**Windows (FlowClone-Setup.exe):** Settings → Apps → FlowClone → Uninstall. It asks whether
+to also remove your settings, history and the downloaded speech model.
+
+**Windows (script install):**
 
 ```powershell
 $env:FLOWCLONE_UNINSTALL='1'; irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | iex; Remove-Item Env:FLOWCLONE_UNINSTALL
 ```
 
-This removes the app, the Start-menu shortcut and the autostart entry. Delete `%APPDATA%\FlowClone` too if you also want your settings and history gone.
+This removes the app, the Start-menu shortcut and the autostart entry (and the speech model,
+unless FlowClone.exe is also installed). Delete `%APPDATA%\FlowClone` too if you also want
+your settings and history gone.
 
 **Android:** long-press FlowKey → Uninstall.
 
 ## 🗺️ Roadmap
 
 - [ ] Command mode — select text, say *“make this more formal”*
-- [ ] Signed standalone `FlowClone.exe` installer
+- [x] Standalone `FlowClone.exe` installer
+- [ ] Code signing for the Windows installer
 - [x] Spoken punctuation commands in Czech, French, Spanish and 6 more languages (Android)
 - [ ] macOS port
 - [x] Android: live text in every language

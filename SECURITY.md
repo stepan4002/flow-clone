@@ -13,8 +13,13 @@
   key rotation from the debug key that signed v1.0–v1.1). Debug builds are a separate app
   (`com.flowkey.ime.debug`).
 - **Windows (FlowClone):** network access is limited to the one-time speech-model
-  download from Hugging Face, and — only if you enable AI polish — HTTP calls to your
-  own Ollama server (`http://localhost:11434` by default).
+  download from Hugging Face — pinned to one exact model revision, every file checked
+  against a SHA-256 in the source code (`model_store.py`) — and, only if you enable AI
+  polish, HTTP calls to your own Ollama server (`http://localhost:11434` by default).
+- **Windows installer:** `FlowClone-Setup.exe` is not code-signed yet. Each release
+  publishes `FlowClone-Setup.exe.sha256`; compare it with
+  `Get-FileHash .\FlowClone-Setup.exe -Algorithm SHA256`. The installer is built by GitHub
+  Actions from the tagged source (`.github/workflows/windows-release.yml`).
 - The Windows app reads keyboard state through a global hook to detect the push-to-talk
   hotkey. It does not log keystrokes.
 - Transcripts are stored locally (`%APPDATA%\FlowClone\history.jsonl` and logs on

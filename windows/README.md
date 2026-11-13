@@ -21,6 +21,13 @@ hold hotkey → mic capture (sounddevice, 16 kHz)
 
 ## Install (5 minutes)
 
+**Installer (recommended):** download
+[FlowClone-Setup.exe](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowClone-Setup.exe)
+and run it. No admin rights and no Python needed; it installs into
+`%LOCALAPPDATA%\Programs\FlowClone`, adds a Start-menu entry and can start FlowClone when you
+sign in. It isn't code-signed yet: if Windows says *"Windows protected your PC"*, click
+**More info → Run anyway**.
+
 **One line** (PowerShell, no admin needed). This installs into `%LOCALAPPDATA%\FlowClone`,
 creates a Start-menu shortcut and launches the app:
 
@@ -39,12 +46,33 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | i
    ```
    python run.py
    ```
-   First run downloads the speech model (~330 MB, one time, cached in
-   `~/.cache/huggingface`). When the tray icon appears and "Loading speech model…"
-   disappears, you're live.
+   First run downloads the speech model (~670 MB, one time) into
+   `%LOCALAPPDATA%\FlowClone\models`, with the progress shown on the status pill and the
+   tray tooltip. If an earlier FlowClone already downloaded it into the Hugging Face cache
+   (`~/.cache/huggingface`), it is reused instantly (hardlinked, no extra disk space). When
+   the pill disappears, you're live.
 
-Optional: `build_exe.bat` builds a standalone `FlowClone.exe` with PyInstaller so the
-app runs without Python installed.
+**Offline / blocked network:** download the four files `encoder-model.int8.onnx`,
+`decoder_joint-model.int8.onnx`, `vocab.txt` and `config.json` from
+[istupakov/parakeet-tdt-0.6b-v3-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx)
+into `%LOCALAPPDATA%\FlowClone\models\parakeet-tdt-0.6b-v3-int8\` and start FlowClone; they
+are checked once and used.
+
+## Build FlowClone.exe and the installer
+
+Python 3.12, from this folder:
+
+```bat
+pip install -r requirements-build.txt
+build_exe.bat          & rem -> dist\FlowClone\FlowClone.exe, then runs its self-test
+build_installer.bat    & rem -> installer\Output\FlowClone-Setup.exe (needs Inno Setup 6)
+```
+
+`FlowClone.spec` is the PyInstaller definition and `requirements-build.txt` pins every
+version. The exe contains the Parakeet engine only; the Whisper engine (faster-whisper)
+stays available in the script install. `FlowClone.exe --selftest` checks a build and writes
+`%TEMP%\FlowClone-selftest.log`. Releases are built by GitHub Actions (see
+[../RELEASING.md](../RELEASING.md)).
 
 ## Usage
 
@@ -144,14 +172,21 @@ Open the Hub (double-click the tray icon) → **Settings** → tick
 
 ## Troubleshooting
 
-- **Nothing types / hotkey dead in some window** → that window runs as admin; run
-  FlowClone from an admin terminal too.
+- **Nothing types / hotkey dead in some window** → that window runs as admin. Start
+  FlowClone as administrator too (right-click it in the Start menu → *Run as
+  administrator*; the script install: run it from an admin terminal).
 - **Start menu pops up sometimes** → release Ctrl last (or change the hotkey to
   `["f9"]` in config.json — any keys work, e.g. `["ctrl", "alt"]`).
 - **Slow first transcription** → the model warms up once after start; subsequent
   dictations are ~0.3–0.8 s.
-- **Wrong mic** → set `"audio": {"device": N}`; list devices with
+- **Wrong mic** → set `"audio": {"device": N}` in config.json (tray → *Open settings
+  folder*). Script install: list devices with
   `python -c "import sounddevice; print(sounddevice.query_devices())"`.
+- **"Speech model download failed"** → check the connection and use tray → *Retry speech
+  model download* (it resumes). Behind a strict firewall, use the offline steps under
+  *Install*. Details are in `%APPDATA%\FlowClone\logs\flowclone.log`.
+- **FlowClone crashed / didn't start** → see `logs\flowclone.log` and `logs\crash.log` in
+  the settings folder.
 - **Paste lands in the wrong app** → the text goes to whatever is focused when you
   release the hotkey; don't Alt-Tab mid-dictation.
 - **Czech/French/Spanish comes out as English words** → very short utterances can
@@ -161,10 +196,17 @@ Open the Hub (double-click the tray icon) → **Settings** → tick
 ## Code layout
 
 ```
-run.py                  entry point
+run.py                  entry point (also: --selftest)
+FlowClone.spec          PyInstaller build definition (FlowClone.exe)
+installer/FlowClone.iss Inno Setup installer
+tools/                  icon + third-party-notices generators
 flowclone/
-  app.py                orchestrator + push-to-talk state machine
+  app.py                orchestrator + push-to-talk state machine + single instance
   config.py             defaults + %APPDATA% config loading
+  paths.py              source-vs-exe paths, model folder, autostart command
+  crash.py              crash logging (threads, native crashes) + fatal-error dialog
+  model_store.py        pinned, SHA-256-verified, resumable model download / reuse
+  selftest.py           FlowClone.exe --selftest
   audio.py              sounddevice recorder
   stt.py                Parakeet (onnx-asr) + Whisper (faster-whisper) engines
   cleanup.py            rule-based polish (fillers, punctuation, scratch-that…)
@@ -176,6 +218,11 @@ flowclone/
   overlay.py            "Flow Bar" status pill (tkinter)
   tray.py               system tray icon + menu (pystray)
   history.py            JSONL dictation history
+  hub.py                the Hub window (stats, dictionary, snippets, settings, autostart)
+  icon.py               the microphone icon (tray, exe, installer)
+  sounds.py             start/stop beeps
+  stats.py              word counts
+  logging_setup.py      log files in %APPDATA%\FlowClone\logs
 ```
 
 ## Licenses
