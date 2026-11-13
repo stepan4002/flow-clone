@@ -78,6 +78,13 @@
 
     <string name="hotwords_crash_title">Word boosting turned off</string>
     <string name="hotwords_crash_message">The English streaming engine crashed while loading your words, so it now runs without them. Streaming itself stays on. Edit your words to try again.</string>
+    <string name="setup_languages_title">Languages</string>
+    <string name="setup_language_row">%1$s  ·  %2$s</string>
+    <string name="setup_languages_desc">The language key cycles AUTO and these. Add any of 99 languages — no download needed.</string>
+    <string name="setup_languages_add">Add a language</string>
+    <string name="setup_languages_pick">Add a language</string>
+    <string name="setup_languages_added">Added %1$s — tap the language key to switch to it.</string>
+    <string name="setup_languages_keep_one">Keep at least one language.</string>
     <string name="setup_dl_title">Extra: higher-accuracy model</string>
     <string name="setup_dl_desc">Whisper small (~375 MB download, ~2–3× slower). Most useful for languages the built-in model handles less well. Optional — FlowKey works without it.</string>
     <string name="setup_dl_download">Download</string>

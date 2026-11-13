@@ -61,6 +61,7 @@ class SetupActivity : AppCompatActivity() {
         setupSettings()
         setupUserLists()
         setupDownload()
+        binding.buttonAddLanguage.setOnClickListener { showAddLanguage() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -91,6 +92,8 @@ class SetupActivity : AppCompatActivity() {
         }
         refreshStatuses()
         renderLists()
+        renderLanguages()
+        rebuildLanguageSpinner() // the keyboard's language key may have changed it
         renderDownload(ModelDownloader.state.value)
     }
 
@@ -385,6 +388,63 @@ class SetupActivity : AppCompatActivity() {
     }
 
     // ----------------------------------------------------- dictionary lists
+
+    // ------------------------------------------------------------- languages
+
+    private fun renderLanguages() {
+        val container = binding.listLanguages
+        container.removeAllViews()
+        val codes = Prefs.getEnabledLanguages(this).filter { it != Languages.AUTO }
+        for (code in codes) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(4), 0, dp(4))
+            }
+            row.addView(TextView(this).apply {
+                text = getString(R.string.setup_language_row, code.uppercase(), Languages.displayName(code))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(TextView(this).apply {
+                text = getString(R.string.setup_list_remove)
+                setTextColor(ContextCompat.getColor(this@SetupActivity, R.color.flowkey_accent))
+                setPadding(dp(12), dp(4), 0, dp(4))
+                setOnClickListener {
+                    if (Prefs.removeLanguage(this@SetupActivity, code)) {
+                        RecognizerManager.applyLanguage(this@SetupActivity)
+                        rebuildLanguageSpinner()
+                        renderLanguages()
+                    } else {
+                        Toast.makeText(this@SetupActivity, R.string.setup_languages_keep_one, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+            container.addView(row)
+        }
+    }
+
+    private fun showAddLanguage() {
+        val enabled = Prefs.getEnabledLanguages(this).toSet()
+        val choices = Languages.WHISPER_CODES.filter { it !in enabled }
+            .sortedBy { Languages.displayName(it) }
+        val labels = choices.map { Languages.displayName(it) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.setup_languages_pick)
+            .setItems(labels) { _, which ->
+                val code = choices[which]
+                if (Prefs.addLanguage(this, code)) {
+                    rebuildLanguageSpinner()
+                    renderLanguages()
+                    Toast.makeText(
+                        this,
+                        getString(R.string.setup_languages_added, Languages.displayName(code)),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 
     private fun renderLists() {
         renderList(binding.listDictionary, UserData.getDictionary(this)) { index ->
