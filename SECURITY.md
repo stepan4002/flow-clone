@@ -2,8 +2,14 @@
 
 ## Design guarantees
 
-- **Android (FlowKey):** the only permission is `RECORD_AUDIO`. There is no `INTERNET`
-  permission, so audio and text cannot leave the phone.
+- **Android (FlowKey):** speech is recognized entirely on the phone and audio never leaves
+  it. Since v1.2 the app has the `INTERNET` permission for exactly one feature: the optional
+  higher-accuracy model, downloaded only when you tap Download in Setup. That code
+  (`ModelDownloader.kt`) fetches fixed HTTPS URLs on huggingface.co and rejects any file whose
+  SHA-256 does not match the pinned hash. Nothing else in the app opens a connection.
+- **Android releases** are signed with a dedicated release key (APK Signature Scheme v3, with
+  key rotation from the debug key that signed v1.0–v1.1). Debug builds are a separate app
+  (`com.flowkey.ime.debug`).
 - **Windows (FlowClone):** network access is limited to the one-time speech-model
   download from Hugging Face, and — only if you enable AI polish — HTTP calls to your
   own Ollama server (`http://localhost:11434` by default).

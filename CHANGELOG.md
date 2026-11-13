@@ -3,6 +3,31 @@
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/);
 versioning: [SemVer](https://semver.org/).
 
+## [1.2.0] — 2026-11-13
+
+### Android — FlowKey
+- Live text in every language: words appear while you speak (Silero voice detector +
+  Whisper per phrase); the whole dictation stays editable until it ends
+- Spoken punctuation commands in 10 languages: English, Czech, Slovak, French, Spanish,
+  German, Italian, Portuguese, Polish, Dutch (list in `android/COMMANDS.md`)
+- Languages: add any of Whisper's 99 languages to the language key in Setup, no download
+- "Your words": names and jargon get your spelling, close misspellings are fixed, and the
+  English streaming engine boosts them (hotwords)
+- Optional higher-accuracy model (Whisper small, ~375 MB), downloaded in-app on request,
+  resumable and SHA-256 checked. This is the only use of the new INTERNET permission
+- Releases are signed with a dedicated release key (APK key rotation from the old debug
+  key, so updates install in place); debug builds are a separate "FlowKey debug" app
+
+### Android — FlowKey — fixes
+- Dictations longer than ~30 s no longer lose their end (Whisper's input limit)
+- English streaming mode no longer types its text in ALL CAPS
+- Android backup works again: the large speech models no longer exceed the quota
+- Whisper decodes short phrases faster (less zero padding)
+
+### Project
+- Android unit tests (JVM) run in CI
+- `fetch-deps.sh` also downloads the voice detector; `tools/export_bpe_vocab.py`
+
 ## [1.1.1] — 2026-11-13
 
 ### Android — FlowKey — fixes

@@ -1,10 +1,17 @@
 # FlowKey — Model & AAR Downloads
 
-FlowKey runs speech recognition **100% on-device** with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
-Nothing is bundled in the APK, so you download two things yourself:
+FlowKey runs speech recognition **on-device** with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
-1. The **sherpa-onnx Android library (AAR)** — needed to *build* the app.
-2. The **speech model files** — needed to *run* the app (copied to the phone).
+**Using the release `FlowKey.apk`? You need nothing from this page:** it already contains
+both speech models and the voice detector. The optional higher-accuracy model (Whisper small)
+is downloaded from inside the app (Setup → *Extra: higher-accuracy model*).
+
+This page is for building FlowKey yourself, or for `FlowKey-no-model.apk`:
+
+1. The **sherpa-onnx Android library (AAR)** and the **Silero voice detector**, needed to
+   *build* the app. `./fetch-deps.sh` downloads both.
+2. The **speech model files**, needed to *run* the app (bundled with
+   `./fetch-deps.sh --model`, or copied to the phone).
 
 ---
 
@@ -18,11 +25,19 @@ Nothing is bundled in the APK, so you download two things yourself:
 3. Copy it into the project at: **`app/libs/`**
 4. In Android Studio: **File → Sync Project with Gradle Files**
 
-The build script picks up any `*.aar` in `app/libs/` automatically.
+The build script picks up any `*.aar` in `app/libs/` automatically. FlowKey is tested with
+**1.12.14** (what `fetch-deps.sh` downloads).
+
+### Voice detector for live text (Silero VAD, ~0.6 MB)
+
+`fetch-deps.sh` puts
+https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+at **`app/src/main/assets/vad/silero_vad.onnx`**. Without it the app builds and works, but
+**Live text** is unavailable: Whisper then transcribes once after you stop.
 
 ---
 
-## 2. Default engine model: multilingual Whisper (EN · CS · FR · ES · auto)
+## 2. Default engine model: multilingual Whisper (99 languages + auto)
 
 FlowKey's default engine is OpenAI Whisper (multilingual) running through sherpa-onnx's
 `OfflineRecognizer`. **Do NOT download a `.en` variant** — those are English-only and
@@ -33,7 +48,7 @@ Pick ONE:
 | Model | Download | Size (int8) | Recommendation |
 |---|---|---|---|
 | **whisper-base** (multilingual) | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2 | ~80 MB | Start here. Good quality, works on mid-range phones. |
-| **whisper-small** (multilingual) | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2 | ~250 MB | Best quality of the two; needs a reasonably strong phone (slower transcription). |
+| **whisper-small** (multilingual) | Use **Setup → Extra: higher-accuracy model** in the app | ~375 MB | Better quality, 2–3× slower. The app downloads it to `files/model/whisper-small/` and checks every file's SHA-256. |
 
 More models: https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html
 
@@ -116,11 +131,23 @@ Android/data/com.flowkey.ime/files/model/zipformer/
 
 (or bundle at `app/src/main/assets/model/zipformer/`).
 
+### Hotwords ("Your words" in the streaming engine)
+
+The streaming engine boosts the user's words with sherpa-onnx hotwords. For this BPE model
+that needs a `bpe.vocab`, which the model does not ship. FlowKey commits one at
+`app/src/main/assets/hotwords/en-2023-06-26.bpe.vocab`, exported from the model's
+`bpe.model` with `tools/export_bpe_vocab.py`. If you replace the streaming model with
+another BPE model, FlowKey notices the mismatch (the vocab must match `tokens.txt`) and
+simply runs without hotwords. Regenerate the vocab with
+`python tools/export_bpe_vocab.py <model>/bpe.model app/src/main/assets/hotwords/en-2023-06-26.bpe.vocab`.
+
 ---
 
 ## 4. How FlowKey finds the files
 
-- Whisper: looks in `files/model/whisper/`, then in `files/model/` itself.
+- Whisper: looks in `files/model/whisper/`, then in `files/model/` itself. The downloaded
+  higher-accuracy model lives in `files/model/whisper-small/`; whichever one is selected in
+  Setup is preferred, and the other one is the fallback.
 - Zipformer: looks in `files/model/zipformer/`, then in `files/model/` (a `joiner` file is
   what marks a folder as a Zipformer model).
 - File names don't have to match exactly — the app picks the `.onnx` file whose name
@@ -129,6 +156,8 @@ Android/data/com.flowkey.ime/files/model/zipformer/
 ## 5. Upgrade ideas
 
 - **whisper-medium** (multilingual): noticeably better accuracy, but slow on most phones.
+- **Per-language streaming models** (French, Spanish, Korean, …) from the sherpa-onnx
+  asr-models release: faster live text than Whisper for that one language.
 - **NVIDIA Parakeet / NeMo transducer int8** (English, flagship phones): supported by
   sherpa-onnx via `OfflineRecognizerConfig(modelConfig = OfflineModelConfig(transducer=...))`
   — requires a small code change in `RecognizerManager.whisperConfig()` (different model

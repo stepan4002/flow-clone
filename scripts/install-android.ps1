@@ -38,7 +38,7 @@ function Install-FlowKey {
     $downloaded = $false
     if (-not $apk) {
         $apk = Join-Path ([IO.Path]::GetTempPath()) 'FlowKey.apk'
-        Write-Host '==> Downloading FlowKey.apk (~210 MB, includes the speech model)' -ForegroundColor Cyan
+        Write-Host '==> Downloading FlowKey.apk (~270 MB, includes the speech models)' -ForegroundColor Cyan
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -UseBasicParsing -Uri $ApkUrl -OutFile $apk
