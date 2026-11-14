@@ -1,15 +1,20 @@
 # Contributing
 
-Thanks for helping! FlowClone has one rule above all others: **it stays 100 % local**.
-Please don't add cloud APIs, telemetry or analytics. Local, optional extras (like the
-Ollama polish tier) are welcome.
+Thanks for helping! FlowClone has one rule above all others: **local by default**.
+Speech recognition always runs on the device, and nothing is sent anywhere unless the user
+turns it on. Cloud features are allowed only as opt-in extras that the user configures with
+their own key (like the AI-rewrite providers) — never on by default. No telemetry, no
+analytics, no accounts.
 
 ## Getting set up
 
 - **Windows app:** `cd windows && pip install -r requirements.txt && python run.py`
 - **Android app:** `cd android && ./fetch-deps.sh && ./gradlew assembleDebug`
 - **Tests:** `python -m pytest windows/tests` — please add a test when you change
-  `cleanup.py` or `lexicon.py`.
+  `cleanup.py`, `lexicon.py`, `styles.py`, `llm.py`, `history.py` or `stats.py`. The UI lives
+  in `windows/flowclone/ui/` (Qt); everything outside it must stay importable without Qt.
+- **Screenshots of the Windows app:** `python windows/tools/screenshots.py OUT_DIR both`
+  (demo data, temporary profile).
 
 ## Pull requests
 

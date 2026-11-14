@@ -53,8 +53,9 @@ Type: filesandordirs; Name: "{app}\_internal"; Check: IsFlowCloneFolder
 Source: "..\dist\FlowClone\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\FlowClone"; Filename: "{app}\FlowClone.exe"
-Name: "{autodesktop}\FlowClone"; Filename: "{app}\FlowClone.exe"; Tasks: desktopicon
+; AppUserModelID = the one FlowClone.exe sets: taskbar grouping and notifications say "FlowClone".
+Name: "{autoprograms}\FlowClone"; Filename: "{app}\FlowClone.exe"; AppUserModelID: "FlowClone.App"
+Name: "{autodesktop}\FlowClone"; Filename: "{app}\FlowClone.exe"; AppUserModelID: "FlowClone.App"; Tasks: desktopicon
 
 [Registry]
 ; No uninsdeletevalue: the uninstaller removes the value only if it still points here
@@ -65,7 +66,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\FlowClone.exe"; Description: "Start FlowClone now"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-FinishedLabel=FlowClone is installed. On first start it downloads its speech model once (about 670 MB) and shows the progress near the bottom of the screen.
+FinishedLabel=FlowClone is installed. On first start a short setup shows you around while the speech model downloads once (about 670 MB).
 
 [Code]
 const

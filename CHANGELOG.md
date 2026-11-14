@@ -6,6 +6,21 @@ versioning: [SemVer](https://semver.org/).
 ## [1.3.0] — unreleased
 
 ### Windows — FlowClone
+- **New app window** (Qt): Home with insights (words, streak, speaking speed, time saved, top
+  apps, 30-day activity), **History** you can search, paste again and delete, Dictionary,
+  Snippets, **Styles**, Settings and About — dark and light theme, follows Windows
+- **Styles per app**: verbatim in code editors and terminals, casual in chat, formal in email,
+  clean everywhere else — rules work offline; with AI on, the text is rewritten in the style
+- **Command Mode**: select text, hold Ctrl+Win+Shift and say what to do ("make this shorter",
+  "translate to Spanish"); with nothing selected it writes what you ask for
+- **AI rewrite providers**: local Ollama, any OpenAI-compatible API (OpenAI, Groq, OpenRouter,
+  LM Studio…) or Anthropic, with your own key stored in Windows Credential Manager; off by
+  default, falls back to the rule-cleaned text on any error
+- **First-run setup**: microphone check, a first dictation, where to find the tray icon
+- New status pill with a live microphone waveform, and a new app icon
+- Hand edits of dictionary.json / snippets.json apply on the next dictation
+- Microphone choice in Settings; the hotkey can be recorded instead of typed
+- The log no longer contains any dictated text
 - Standalone **FlowClone-Setup.exe**: no Python needed, per-user install without admin
   rights, Start-menu entry, optional autostart, clean uninstall that asks before removing
   settings or the speech model
@@ -13,7 +28,7 @@ versioning: [SemVer](https://semver.org/).
   with progress on the status pill and tray tooltip; an existing Hugging Face cache copy is
   reused without extra disk space; tray → *Retry speech model download*
 - Pressing the hotkey while the model is still downloading says so instead of recording
-- Starting FlowClone again opens the running copy's Hub instead of silently doing nothing
+- Starting FlowClone again opens the running window instead of silently doing nothing
 - Crashes in any thread are written to `logs\flowclone.log` / `logs\crash.log`
 - `install.ps1` no longer removes or overwrites anything that belongs to an exe install
 
@@ -25,6 +40,8 @@ versioning: [SemVer](https://semver.org/).
 - The speech model size is ~670 MB (was documented as ~330 MB)
 
 ### Project
+- Windows UI moved from Tk / pystray / Pillow to Qt 6 (PySide6-Essentials, LGPL; notices and
+  licence texts are shipped with the app)
 - `windows-release.yml` builds, self-tests and attaches the installer for version tags;
   release checklist in `RELEASING.md`
 

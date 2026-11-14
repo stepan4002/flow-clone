@@ -1,7 +1,7 @@
 """Write THIRD-PARTY-NOTICES.txt for FlowClone.exe from the build environment.
 
 Lists every bundled Python distribution with its version, licence and licence text, plus
-the non-Python components (Python itself, Tcl/Tk, PortAudio) and the speech model.
+the non-Python components (Python itself, Qt 6, PortAudio) and the speech model.
 
 Usage (from windows/, in the build venv):  python tools/gen_notices.py
 """
@@ -17,15 +17,29 @@ OUT = ROOT / "THIRD-PARTY-NOTICES.txt"
 BUILD_ONLY = {"pyinstaller", "pyinstaller-hooks-contrib", "altgraph", "pefile", "pip",
               "setuptools", "pytest", "iniconfig", "pluggy", "pygments", "pywin32-ctypes"}
 # Excluded from the exe by FlowClone.spec.
-EXCLUDED = {"faster-whisper", "ctranslate2", "av", "tokenizers", "hf-xet"}
+EXCLUDED = {"faster-whisper", "ctranslate2", "av", "tokenizers", "hf-xet",
+            "pystray", "pillow"}  # pystray/Pillow: dev-only since the Qt interface
 
 FIXED = """\
 ================================================================================
 Python {py}
 Python Software Foundation License Version 2 — https://docs.python.org/3/license.html
 
-Tcl/Tk 8.6 (bundled with Python's tkinter)
-Tcl/Tk License (BSD-style) — https://www.tcl.tk/software/tcltk/license.html
+Qt 6.12 and Qt for Python (PySide6 / Shiboken6) 6.12 — the user interface
+GNU Lesser General Public License v3 (LGPL-3.0-only); full texts in licenses\LGPL-3.0.txt
+and licenses\GPL-3.0.txt next to this file.
+FlowClone uses Qt as unmodified, dynamically linked libraries: the Qt DLLs (_internal\PySide6\)
+and the PySide6 / Shiboken6 Python files (_internal\PySide6\, _internal\shiboken6\) are
+separate files that you may replace with your own builds of the same versions.
+Source code: https://download.qt.io/official_releases/qt/6.12/ and
+https://code.qt.io/cgit/pyside/pyside-setup.git/ (tag v6.12.0). Copyright (C) The Qt Company Ltd.
+and other contributors.
+Qt includes third-party code, each under its own permissive licence, listed at
+https://doc.qt.io/qt-6/licenses-used-in-qt.html — among them: zlib (zlib licence), libpng
+(libpng licence), FreeType (FreeType Project licence: "Portions of this software are copyright
+(C) The FreeType Project (www.freetype.org). All rights reserved."), HarfBuzz (MIT), PCRE2
+(BSD-3-Clause), double-conversion (BSD-3-Clause), md4c (MIT), libjpeg (IJG), and the Unicode
+Character Database (Unicode licence).
 
 PortAudio (bundled with sounddevice)
 MIT License — Copyright (c) 1999-2006 Ross Bencina and Phil Burk
@@ -35,8 +49,7 @@ NVIDIA Parakeet-TDT-0.6B-v3 — Creative Commons Attribution 4.0 (CC-BY-4.0)
 https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 ONNX conversion by Ilya Stupakov: https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
 
-pystray is licensed under the GNU LGPL v3. FlowClone.exe ships it as plain Python source
-files inside the _internal folder, so it can be replaced with a modified version.
+FlowClone's own line icons (assets\icons) are part of FlowClone (MIT).
 ================================================================================
 """
 

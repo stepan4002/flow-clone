@@ -43,3 +43,18 @@ def test_broken_json_falls_back_to_defaults(monkeypatch, tmp_path):
     (tmp_path / "snippets.json").write_text("{}", encoding="utf-8")
     lex = lexicon.Lexicon()
     assert lex.words == lexicon._DEFAULT_DICTIONARY["words"]
+
+
+def test_save_and_reload_if_changed(monkeypatch, tmp_path):
+    import os
+    import time
+    _use_tmp_files(monkeypatch, tmp_path)
+    lex = lexicon.Lexicon()
+    lex.save_dictionary(["Kubernetes"], {"cube": "kube"}, {})
+    lex.save_snippets({"my zoom": "https://zoom.example/123"})
+    assert lex.words == ["Kubernetes"] and lex.snippets == {"my zoom": "https://zoom.example/123"}
+    assert not lex.reload_if_changed()
+    (tmp_path / "snippets.json").write_text('{"sig": "Cheers"}', encoding="utf-8")
+    later = time.time() + 5
+    os.utime(tmp_path / "snippets.json", (later, later))
+    assert lex.reload_if_changed() and lex.snippets == {"sig": "Cheers"}

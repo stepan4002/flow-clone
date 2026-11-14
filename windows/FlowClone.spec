@@ -39,27 +39,47 @@ datas = (
     + copy_metadata("onnx_asr")          # onnx_asr reads its own version at import
     + [
         (os.path.join(HERE, "assets", "flowclone.ico"), "assets"),
+        (os.path.join(HERE, "assets", "flowclone-active.ico"), "assets"),
+        (os.path.join(HERE, "assets", "flowclone.png"), "assets"),
+        (os.path.join(HERE, "assets", "icons", "*.svg"), os.path.join("assets", "icons")),
+        (os.path.join(HERE, "licenses", "*.txt"), "licenses"),
         (os.path.join(HERE, "..", "LICENSE"), "."),
         (os.path.join(HERE, "THIRD-PARTY-NOTICES.txt"), "."),
     ]
 )
 
+# Qt modules FlowClone doesn't use (it is a Qt Widgets app): keep them out of the bundle.
+QT_UNUSED = ("QtQml", "QtQuick", "QtNetwork", "QtOpenGL", "QtPdf", "QtWebEngine", "QtMultimedia",
+             "QtDesigner", "QtUiTools", "QtSql", "QtTest", "QtConcurrent", "QtDBus", "QtXml")
+
 a = Analysis(  # noqa: F821
     [os.path.join(HERE, "run.py")],
     pathex=[HERE],
     datas=datas,
-    hiddenimports=["pystray._win32"],
+    hiddenimports=[],
     excludes=[
         # Not in the exe: optional Whisper engine (+130 MB) and Hugging Face's Rust
         # downloader (FlowClone downloads its model itself, see model_store.py).
         "faster_whisper", "ctranslate2", "av", "tokenizers", "hf_xet",
         # Pulled in by onnxruntime's optional tools; never used at runtime.
         "torch", "onnx", "transformers",
-    ],
-    # pystray is LGPL: ship it as plain .py files so it can be replaced.
-    module_collection_mode={"pystray": "py"},
+        # The old Tk / pystray interface and the Pillow icon drawing (replaced by Qt).
+        "tkinter", "_tkinter", "pystray", "PIL",
+    ] + [f"PySide6.{m}" for m in QT_UNUSED],
+    # PySide6 / Shiboken6 are LGPL: their Python parts ship as plain .py files and the Qt
+    # libraries as separate DLLs in _internal, so they can be replaced.
+    module_collection_mode={"PySide6": "py", "shiboken6": "py"},
     noarchive=False,
 )
+
+# Drop Qt libraries/plugins that a Widgets app never loads (software OpenGL, QML/Quick, PDF,
+# networking, translations): about 60 MB.
+_DROP = ("opengl32sw.dll", "d3dcompiler_47.dll", "qt6pdf", "qt6qml", "qt6quick", "qt6network",
+         "qt6opengl", "qt6virtualkeyboard", "qt6labs", "qtuiotouchplugin", "qpdf", "qtvirtualkeyboard",
+         "qtquick", "qmltooling")
+a.binaries = [b for b in a.binaries if not any(d in b[0].lower() for d in _DROP)]
+a.datas = [d for d in a.datas
+           if not d[0].replace("/", "\\").lower().startswith(("pyside6\translations", "pyside6\qml"))]
 pyz = PYZ(a.pure)  # noqa: F821
 
 exe = EXE(  # noqa: F821

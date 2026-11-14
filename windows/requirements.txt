@@ -4,8 +4,7 @@ sounddevice           # microphone capture
 numpy
 keyboard              # global push-to-talk hotkey (low-level hook, no admin needed)
 pyperclip             # clipboard save/set/restore
-pystray               # system tray icon
-Pillow                # tray icon rendering
+PySide6-Essentials>=6.12,<6.13   # the app window, status pill and tray icon (Qt 6, LGPL)
 psutil                # foreground-app detection (tone matching)
 pywin32               # foreground window handle
 requests              # optional Ollama cleanup calls

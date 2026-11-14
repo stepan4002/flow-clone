@@ -166,7 +166,7 @@ function Install-FlowClone {
         & $Python -m venv $VenvDir
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the virtual environment.' }
     }
-    Write-Step 'Installing dependencies (first install takes a few minutes)'
+    Write-Step 'Installing dependencies (first install downloads about 250 MB and takes a few minutes)'
     & $VenvPy -m pip install --disable-pip-version-check --quiet --upgrade pip
     & $VenvPy -m pip install --disable-pip-version-check --quiet -r (Join-Path $AppDir 'requirements.txt')
     if ($LASTEXITCODE -ne 0) {
@@ -199,7 +199,7 @@ function Install-FlowClone {
     Write-Host 'FlowClone is installed.' -ForegroundColor Green
     Write-Host '  - Hold Ctrl+Win, speak, release: your words are typed into the focused app.'
     Write-Host '  - The first start downloads the speech model (~670 MB, one time).'
-    Write-Host '  - Double-click the tray icon for settings; enable "Start with Windows" there.'
+    Write-Host '  - Open FlowClone from the Start menu or the tray icon for settings, history and styles.'
     Write-Host '  - Start it later from the Start menu: FlowClone.'
     if ($env:FLOWCLONE_NO_START -ne '1') {
         Start-Process -FilePath $Pythonw -ArgumentList "`"$RunPy`"" -WorkingDirectory $AppDir

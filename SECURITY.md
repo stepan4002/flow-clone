@@ -14,8 +14,12 @@
   (`com.flowkey.ime.debug`).
 - **Windows (FlowClone):** network access is limited to the one-time speech-model
   download from Hugging Face — pinned to one exact model revision, every file checked
-  against a SHA-256 in the source code (`model_store.py`) — and, only if you enable AI
-  polish, HTTP calls to your own Ollama server (`http://localhost:11434` by default).
+  against a SHA-256 in the source code (`model_store.py`) — and, only if you turn on AI
+  rewrite, calls to the provider you pick: your own Ollama server (`http://localhost:11434`
+  by default, stays on the PC) or a cloud API (OpenAI-compatible or Anthropic, HTTPS only) that
+  then receives the dictated text — and the selected text in Command Mode — but never audio.
+  API keys are stored in Windows Credential Manager (`FlowClone/llm/<provider>`), never in
+  config files or logs; the log never contains dictated text.
 - **Windows installer:** `FlowClone-Setup.exe` is not code-signed yet. Each release
   publishes `FlowClone-Setup.exe.sha256`; compare it with
   `Get-FileHash .\FlowClone-Setup.exe -Algorithm SHA256`. The installer is built by GitHub
