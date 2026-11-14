@@ -40,6 +40,27 @@ object UserData {
     fun removeSnippet(context: Context, index: Int) =
         save(context, KEY_SNIPPETS, load(context, KEY_SNIPPETS).filterIndexed { i, _ -> i != index })
 
+    /** Edit an entry in place (the app's Dictionary screen). Out-of-range indexes are ignored. */
+    fun updateDictionary(context: Context, index: Int, from: String, to: String) =
+        save(context, KEY_DICTIONARY, load(context, KEY_DICTIONARY).mapIndexed { i, e ->
+            if (i == index) Entry(from.trim(), to.trim()) else e
+        })
+
+    fun updateSnippet(context: Context, index: Int, trigger: String, expansion: String) =
+        save(context, KEY_SNIPPETS, load(context, KEY_SNIPPETS).mapIndexed { i, e ->
+            if (i == index) Entry(trigger.trim(), expansion.trim()) else e
+        })
+
+    /** False if empty or the same as another word. */
+    fun updateWord(context: Context, index: Int, word: String): Boolean {
+        val w = word.trim().replace(Regex("\\s+"), " ")
+        val words = getWords(context)
+        if (w.isEmpty() || index !in words.indices) return false
+        if (words.withIndex().any { (i, it) -> i != index && it.equals(w, ignoreCase = true) }) return false
+        saveWords(context, words.mapIndexed { i, it -> if (i == index) w else it })
+        return true
+    }
+
     fun getWords(context: Context): List<String> {
         val json = prefs(context).getString(KEY_WORDS, null) ?: return emptyList()
         return try {

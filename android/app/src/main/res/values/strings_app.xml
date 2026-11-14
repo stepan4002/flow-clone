@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the FlowKey app screens (Compose). Keyboard strings are in strings.xml. -->
+<resources>
+    <!-- Tabs -->
+    <string name="tab_home">Home</string>
+    <string name="tab_history">History</string>
+    <string name="tab_dictionary">Dictionary</string>
+    <string name="tab_styles">Styles</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="pill_whisper">Whisper ready</string>
+    <string name="pill_whisper_small">Whisper small ready</string>
+    <string name="pill_streaming">Streaming ready</string>
+    <string name="pill_error">Engine error</string>
+
+    <!-- Common actions -->
+    <string name="action_copy">Copy</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_save">Save</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_add_word">Add a word to your words</string>
+    <string name="action_clear_search">Clear search</string>
+    <string name="app_unknown">Unknown app</string>
+    <string name="words_count">%1$,d words</string>
+    <string name="unit_minutes">%1$d min</string>
+    <string name="unit_hours_minutes">%1$d h %2$d min</string>
+
+    <!-- Home -->
+    <string name="home_title">Speak, don\'t type.</string>
+    <string name="home_subtitle">Your private voice keyboard. Speech is recognized on this phone.</string>
+    <string name="home_setup_title">Get set up</string>
+    <string name="home_setup_desc">A few steps and you are dictating in any app.</string>
+    <string name="home_step_model">Speech model</string>
+    <string name="home_step_mic">Microphone access</string>
+    <string name="home_step_enable">Turn on the FlowKey keyboard</string>
+    <string name="home_step_select">Switch to FlowKey</string>
+    <string name="home_step_select_detail">Use the keyboard button in the navigation bar, or the globe key, to switch back any time.</string>
+    <string name="home_fix">Fix</string>
+    <string name="home_allow">Allow</string>
+    <string name="home_turn_on">Turn on</string>
+    <string name="home_choose">Choose</string>
+    <string name="home_ai_key_title">AI rewrite needs your key again</string>
+    <string name="home_ai_key_desc">AI is on but no API key is saved on this phone (keys are never backed up). Until you add it, FlowKey types the rule-cleaned text.</string>
+    <string name="home_open_ai_settings">Open AI settings</string>
+    <string name="home_try_title">Try it</string>
+    <string name="home_try_hint">Tap here and dictate with FlowKey…</string>
+
+    <string name="stat_words">Words dictated</string>
+    <string name="stat_words_today">%1$d today</string>
+    <string name="stat_streak">Day streak</string>
+    <string name="stat_streak_best">Best: %1$d days</string>
+    <string name="stat_wpm">Speaking speed</string>
+    <string name="stat_wpm_detail">words per minute</string>
+    <string name="stat_wpm_needs">after one minute of dictation</string>
+    <string name="stat_saved">Time saved</string>
+    <string name="stat_saved_detail">vs typing at 40 wpm</string>
+    <string name="chart_title">Last 30 days</string>
+    <string name="chart_total">%1$,d words</string>
+    <string name="chart_today">Today</string>
+    <string name="chart_description">Bar chart of words dictated per day over the last 30 days, %1$,d words in total.</string>
+    <string name="top_apps_title">Where you dictate</string>
+    <string name="recent_title">Recent</string>
+    <string name="recent_empty">Your dictations show up here. Tap one to copy it.</string>
+    <string name="recent_see_all">See all history</string>
+    <string name="tips_title">Tips</string>
+    <string name="tip_mic">🎙️ Tap the mic, speak, tap again. Or just pause: FlowKey stops by itself.</string>
+    <string name="tip_edit">✨ Select text and tap Edit (or long-press the mic), then say \"make it shorter\" or \"translate to German\". Needs AI.</string>
+    <string name="tip_style">🎨 The style key switches how text is written in this app: Verbatim, Clean, Casual or Formal.</string>
+    <string name="tip_commands">⏎ Say \"new line\", \"comma\" or \"press enter\" for punctuation and sending.</string>
+
+    <!-- History -->
+    <string name="history_count">%1$d dictations on this phone</string>
+    <string name="history_search">Search your dictations</string>
+    <string name="history_empty_long">No dictations yet. Everything you dictate is kept here, on this phone only.</string>
+    <string name="history_no_results">Nothing matches \"%1$s\".</string>
+    <string name="history_clear_title">Clear all history?</string>
+    <string name="history_clear_message">This deletes every saved dictation from this phone. Your stats stay.</string>
+    <string name="history_add_word_title">Add to your words</string>
+    <string name="history_add_word_message">Type the name or term FlowKey got wrong, spelled correctly.</string>
+    <string name="word_added">Added \"%1$s\" to your words</string>
+
+    <!-- Dictionary -->
+    <string name="dict_title">Dictionary</string>
+    <string name="dict_tab_words">Your words</string>
+    <string name="dict_tab_corrections">Corrections</string>
+    <string name="dict_tab_snippets">Snippets</string>
+    <string name="dict_empty">Nothing here yet. Tap Add.</string>
+    <string name="dict_add_word">Add a word</string>
+    <string name="dict_edit_word">Edit word</string>
+    <string name="dict_add_correction">Add a correction</string>
+    <string name="dict_edit_correction">Edit correction</string>
+    <string name="dict_add_snippet">Add a snippet</string>
+    <string name="dict_edit_snippet">Edit snippet</string>
+
+    <!-- Styles -->
+    <string name="styles_title">Styles</string>
+    <string name="styles_desc">FlowKey writes differently depending on the app: relaxed in chats, polished in email, exact in code.</string>
+    <string name="styles_enable">Per-app styles</string>
+    <string name="styles_enable_desc">Off: every app uses Clean.</string>
+    <string name="styles_default">Other apps</string>
+    <string name="styles_add_app">Add app</string>
+    <string name="styles_pick_app">Choose an app</string>
+    <string name="styles_search_apps">Search apps</string>
+    <string name="styles_no_apps">No apps found.</string>
+    <string name="styles_preview">Preview</string>
+    <string name="styles_preview_desc">The rules alone. With AI on, the style also guides the rewrite.</string>
+    <string name="styles_preview_said">You say</string>
+    <string name="styles_preview_typed">FlowKey types</string>
+    <string name="styles_preview_sample">um so I think we should meet tomorrow at ten.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_search_language">Search languages</string>
+    <string name="action_remove_language">Remove %1$s</string>
+    <string name="settings_text_title">Text</string>
+    <string name="settings_word_correction_desc">Fixes near-misses of your words, e.g. \"Kubernetis\" to \"Kubernetes\".</string>
+
+    <string name="ai_title">✨ AI rewrite and voice edit</string>
+    <string name="ai_desc">Optional. Polishes your dictation in the app\'s style and powers voice edit. Off by default; FlowKey works fully without it.</string>
+    <string name="ai_enable">Use AI</string>
+    <string name="ai_provider">Provider</string>
+    <string name="ai_provider_ollama">Ollama</string>
+    <string name="ai_provider_openai">OpenAI API</string>
+    <string name="ai_provider_anthropic">Anthropic</string>
+    <string name="ai_ollama_url">Ollama address</string>
+    <string name="ai_api_base">API address</string>
+    <string name="ai_model">Model</string>
+    <string name="ai_key">API key</string>
+    <string name="ai_key_hint">Paste your key</string>
+    <string name="ai_key_saved">•••••••• saved (type to replace)</string>
+    <string name="ai_key_where">Encrypted on this phone, sent only to %1$s, never backed up.</string>
+    <string name="ai_key_save">Save key</string>
+    <string name="ai_test">Test</string>
+    <string name="ai_testing">Testing…</string>
+    <string name="ai_tone">Match the app\'s style</string>
+    <string name="ai_tone_desc">Off: the AI always writes in the Clean style.</string>
+    <string name="ai_privacy_local">Your server receives the text of your dictation (never audio). Plain http is allowed only for addresses on your own network.</string>
+    <string name="ai_privacy_cloud">With AI on, the provider receives the text of each dictation and voice edit (never audio) under its own privacy terms. Password and incognito fields never use AI.</string>
+
+    <string name="about_title">About</string>
+    <string name="about_version">FlowKey %1$s</string>
+    <string name="about_privacy">Speech recognition runs entirely on this phone: audio never leaves it. History and stats stay on this phone. FlowKey has no account, no ads and no analytics.</string>
+    <string name="about_licenses">MIT License. Speech recognition by sherpa-onnx (Apache-2.0) with OpenAI Whisper models (MIT) and Silero VAD (MIT).</string>
+    <string name="about_source">Source code</string>
+    <string name="about_url" translatable="false">https://github.com/stepan4002/flow-clone</string>
+</resources>
