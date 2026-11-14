@@ -152,6 +152,25 @@ class HttpTransport(ctx: Context) : LlmClient.Transport {
         } else if (scheme != "https") {
             throw LlmClient.LlmError("unsupported address")
         }
+        // A connection that drops mid-answer (a pooled keep-alive connection the server already
+        // closed: "unexpected end of stream", "connection reset") is retried once. Timeouts,
+        // refused connections and cancellation are not.
+        try {
+            return attempt(target, u, scheme, headers, body, connectMs, readMs)
+        } catch (e: java.io.IOException) {
+            val dropped = e is java.net.ProtocolException || e is java.io.EOFException ||
+                (e is java.net.SocketException && e !is java.net.ConnectException)
+            // The exception only (address and error), never the request or answer text.
+            android.util.Log.w("FlowKeyAI", "POST to ${u.host} failed" + if (dropped) ", retrying" else "", e)
+            if (!dropped || cancelled) throw e
+        }
+        if (cancelled) throw LlmClient.LlmError("cancelled")
+        return attempt(target, u, scheme, headers, body, connectMs, readMs)
+    }
+
+    private fun attempt(target: URL, u: URL, scheme: String, headers: Map<String, String>, body: String,
+                        connectMs: Int, readMs: Int): Pair<Int, String> {
+        val host = u.host
         val conn = target.openConnection() as HttpURLConnection
         current = conn
         try {
