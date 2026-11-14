@@ -18,6 +18,7 @@ DEFAULTS = {
     "language": None,              # None = auto-detect (whisper only; parakeet detects internally)
     "hotkeys": {
         "push_to_talk": ["ctrl", "windows"],   # hold all keys to record, release to insert
+        "command_modifier": "shift",           # hold it too (Ctrl+Win+Shift) for Command Mode
         "paste_last": "shift+alt+z",
         "copy_last": "shift+alt+x",
     },
@@ -42,8 +43,26 @@ DEFAULTS = {
         "url": "http://localhost:11434",
         "model": "qwen3:1.7b",
         "timeout_seconds": 12,
-        "tone_matching": True,                 # tell the LLM which app you're dictating into
+        "tone_matching": True,                 # rewrite in the style of the app's category
+        "provider": "ollama",                  # "ollama" | "openai" (any OpenAI-compatible API) | "anthropic"
+        "api_base": "",                        # OpenAI-compatible base URL ("" = api.openai.com/v1)
+        "api_model": "",                       # model for the openai / anthropic providers
     },
+    # Per-app writing styles: verbatim | clean | casual | formal (AI rewrite only if llm.enabled).
+    "styles": {
+        "enabled": True,
+        "default": "clean",
+        "categories": {
+            "messaging": {"apps": [], "style": "casual"},   # filled from casual_apps
+            "email": {"apps": ["outlook.exe", "olk.exe", "thunderbird.exe"], "style": "formal"},
+            "code": {"apps": ["code.exe", "cursor.exe", "windsurf.exe", "devenv.exe",
+                              "pycharm64.exe", "idea64.exe", "windowsterminal.exe"],
+                     "style": "verbatim"},
+            "documents": {"apps": ["winword.exe", "notion.exe", "obsidian.exe", "onenote.exe"],
+                          "style": "clean"},
+        },
+    },
+    "ui": {"theme": "system", "onboarding_done": False, "window": None},
     "injection": {
         "mode": "paste",                       # "paste" (clipboard+Ctrl+V) or "type" (per-char, for paste-blocking apps)
         "restore_clipboard_delay_ms": 300,
@@ -75,9 +94,30 @@ def load_config() -> dict:
             user = {}
     else:
         user = {}
-        CONFIG_PATH.write_text(json.dumps(DEFAULTS, indent=2), encoding="utf-8")
+        CONFIG_PATH.write_text(json.dumps(defaults(), indent=2), encoding="utf-8")
         log.info("wrote default config to %s", CONFIG_PATH)
-    return _merge(DEFAULTS, user)
+        return defaults()
+    return migrate(user)
+
+
+def defaults() -> dict:
+    d = json.loads(json.dumps(DEFAULTS))  # deep copy
+    d["styles"]["categories"]["messaging"]["apps"] = list(d["casual_apps"])
+    return d
+
+
+def migrate(user: dict) -> dict:
+    """Merge a config written by any earlier version over the defaults."""
+    if not isinstance(user, dict):
+        user = {}
+    merged = _merge(defaults(), user)
+    ui = user.get("ui") if isinstance(user.get("ui"), dict) else {}
+    if "onboarding_done" not in ui:
+        merged["ui"]["onboarding_done"] = True   # an existing user: no first-run tour
+    if "styles" not in user:
+        # Keep the user's own list of casual apps as the messaging category.
+        merged["styles"]["categories"]["messaging"]["apps"] = list(merged.get("casual_apps") or [])
+    return merged
 
 
 def save_config(config: dict):
