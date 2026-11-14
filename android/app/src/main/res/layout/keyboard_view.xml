@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  FlowKey keyboard. Top: status / live text + chips (✨ Edit, Raw, Undo, Open setup).
+  Middle: waveform behind the mic, side keys. Bottom: language, style, space.
+  View ids are used by VoiceInputIME; keep them.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_keyboard"
     android:orientation="vertical"
-    android:paddingLeft="10dp"
-    android:paddingTop="10dp"
-    android:paddingRight="10dp"
+    android:paddingStart="10dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="10dp"
     android:paddingBottom="8dp">
 
-    <!-- Status / partial-text line with optional action chip -->
+    <!-- Status / partial text with chips at the end -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="wrap_content"
         android:gravity="center_vertical"
+        android:minHeight="38dp"
         android:orientation="horizontal">
 
         <TextView
@@ -21,48 +27,67 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:accessibilityLiveRegion="polite"
             android:ellipsize="start"
             android:gravity="center"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:singleLine="true"
             android:text="@string/status_loading"
             android:textColor="@color/key_text_secondary"
             android:textSize="14sp" />
 
         <TextView
+            android:id="@+id/editChip"
+            style="@style/KeyboardChip.Accent"
+            android:contentDescription="@string/cd_edit_chip"
+            android:text="@string/chip_edit"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/rawChip"
+            style="@style/KeyboardChip"
+            android:contentDescription="@string/cd_raw_chip"
+            android:text="@string/chip_raw"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/undoChip"
+            style="@style/KeyboardChip"
+            android:contentDescription="@string/cd_undo_chip"
+            android:text="@string/chip_undo"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/actionButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/bg_key"
-            android:paddingLeft="12dp"
-            android:paddingTop="6dp"
-            android:paddingRight="12dp"
-            android:paddingBottom="6dp"
+            style="@style/KeyboardChip.Accent"
             android:text="@string/action_open_setup"
-            android:textColor="@color/flowkey_accent_light"
-            android:textSize="13sp"
-            android:textStyle="bold"
             android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Main row: globe/settings | mic | backspace/enter -->
-    <RelativeLayout
+    <!-- Main area: waveform behind the mic; globe/settings | mic | backspace/enter -->
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="124dp">
+        android:layout_height="136dp">
+
+        <com.flowkey.ime.WaveformView
+            android:id="@+id/waveform"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no" />
 
         <LinearLayout
             android:id="@+id/leftColumn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_alignParentStart="true"
-            android:layout_centerVertical="true"
-            android:layout_marginStart="6dp"
+            android:layout_gravity="start|center_vertical"
+            android:layout_marginStart="4dp"
             android:orientation="vertical">
 
             <ImageButton
                 android:id="@+id/globeButton"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="@drawable/bg_key"
                 android:contentDescription="@string/cd_globe"
                 android:scaleType="centerInside"
@@ -70,8 +95,8 @@
 
             <ImageButton
                 android:id="@+id/settingsButton"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:layout_marginTop="10dp"
                 android:background="@drawable/bg_key"
                 android:contentDescription="@string/cd_settings"
@@ -81,12 +106,13 @@
 
         <ImageButton
             android:id="@+id/micButton"
-            android:layout_width="84dp"
-            android:layout_height="84dp"
-            android:layout_centerInParent="true"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="center"
             android:background="@drawable/bg_mic"
             android:contentDescription="@string/cd_mic"
-            android:padding="22dp"
+            android:elevation="6dp"
+            android:padding="26dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_mic" />
 
@@ -94,15 +120,14 @@
             android:id="@+id/rightColumn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
-            android:layout_marginEnd="6dp"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="4dp"
             android:orientation="vertical">
 
             <ImageButton
                 android:id="@+id/backspaceButton"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:background="@drawable/bg_key"
                 android:contentDescription="@string/cd_backspace"
                 android:scaleType="centerInside"
@@ -110,21 +135,21 @@
 
             <ImageButton
                 android:id="@+id/enterButton"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:layout_marginTop="10dp"
                 android:background="@drawable/bg_key"
                 android:contentDescription="@string/cd_enter"
                 android:scaleType="centerInside"
                 android:src="@drawable/ic_enter" />
         </LinearLayout>
-    </RelativeLayout>
+    </FrameLayout>
 
-    <!-- Bottom row: language + space -->
+    <!-- Bottom row: language, style, space -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="46dp"
-        android:layout_marginTop="8dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="6dp"
         android:orientation="horizontal">
 
         <TextView
@@ -133,11 +158,30 @@
             android:layout_height="match_parent"
             android:background="@drawable/bg_key"
             android:contentDescription="@string/cd_language"
+            android:ellipsize="end"
             android:gravity="center"
+            android:singleLine="true"
             android:text="@string/lang_auto"
             android:textColor="@color/key_icon"
             android:textSize="14sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/styleChip"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_key"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxWidth="120dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:singleLine="true"
+            android:textColor="@color/flowkey_accent_light"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/spaceButton"
@@ -146,7 +190,9 @@
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:background="@drawable/bg_key"
+            android:ellipsize="end"
             android:gravity="center"
+            android:singleLine="true"
             android:text="@string/space_label"
             android:textColor="@color/key_text_secondary"
             android:textSize="14sp" />

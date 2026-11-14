@@ -3,4 +3,29 @@
     <style name="Theme.FlowKey" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/flowkey_accent</item>
     </style>
+
+    <!-- Small pill buttons in the keyboard's top strip -->
+    <style name="KeyboardChip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">6dp</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="android:maxWidth">140dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/bg_chip</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">@color/key_icon</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="KeyboardChip.Accent">
+        <item name="android:background">@drawable/bg_chip_accent</item>
+        <item name="android:textColor">@color/flowkey_accent_light</item>
+    </style>
 </resources>

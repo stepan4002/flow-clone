@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Keyboard colours: the same tokens as the Windows app, dark in both system themes. -->
 <resources>
     <color name="flowkey_accent">#4C6FFF</color>
+    <color name="flowkey_accent_dark">#3A57E0</color>
     <color name="flowkey_accent_light">#A9BBFF</color>
-    <color name="keyboard_bg">#17171C</color>
-    <color name="key_bg">#2A2A32</color>
-    <color name="key_bg_pressed">#3A3A44</color>
-    <color name="key_icon">#E8E8EC</color>
+    <color name="keyboard_bg">#111114</color>
+    <color name="key_bg">#1F1F26</color>
+    <color name="key_bg_pressed">#2C2C36</color>
+    <color name="key_stroke">#14FFFFFF</color>
+    <color name="chip_bg">#23232B</color>
+    <color name="chip_accent_bg">#294C6FFF</color>
+    <color name="key_icon">#ECECF1</color>
     <color name="key_text_secondary">#9A9AA5</color>
     <color name="mic_recording">#E5484D</color>
+    <color name="mic_recording_dark">#C93A3F</color>
 </resources>

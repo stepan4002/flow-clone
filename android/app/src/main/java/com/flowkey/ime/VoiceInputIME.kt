@@ -1,7 +1,6 @@
 package com.flowkey.ime
 
 import android.animation.ObjectAnimator
-import android.animation.PropertyValuesHolder
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -97,13 +96,26 @@ class VoiceInputIME : InputMethodService() {
 
     @Volatile private var recording = false
     @Volatile private var commitOnStop = true
+    /** Decoding / AI after recording ended. Set from any thread; the UI follows on main. */
     @Volatile private var transcribing = false
+        set(value) {
+            field = value
+            uiHandler.post { updateVisualState() }
+        }
 
+    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var statusText: TextView? = null
     private var actionButton: TextView? = null
     private var micButton: ImageButton? = null
     private var langButton: TextView? = null
-    private var pulse: ObjectAnimator? = null
+    private var waveform: WaveformView? = null
+    private var editChip: TextView? = null
+    private var undoChip: TextView? = null
+    private var rawChip: TextView? = null
+    private var styleChip: TextView? = null
+    /** The undo chip hides at this uptime (accessibility-adjusted timeout). */
+    private var undoDeadline = 0L
+    private val hideUndo = Runnable { updateChips() }
     private var loadingAnim: ObjectAnimator? = null
     private var toneGenerator: ToneGenerator? = null
 
@@ -150,6 +162,10 @@ class VoiceInputIME : InputMethodService() {
     /** The AI call in flight (tap the mic to skip it), or null. */
     @Volatile private var aiCall: LlmClient? = null
     @Volatile private var polishing = false
+        set(value) {
+            field = value
+            uiHandler.post { updateVisualState() }
+        }
 
     /** The cursor/selection the editor reported last (onUpdateSelection). */
     private var selStart = -1
@@ -164,6 +180,15 @@ class VoiceInputIME : InputMethodService() {
         val generation: Int,
     )
     private var lastInsert: LastInsert? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                undoDeadline = SystemClock.uptimeMillis() + undoTimeoutMs()
+                uiHandler.removeCallbacks(hideUndo)
+                uiHandler.postDelayed(hideUndo, undoTimeoutMs() + 50)
+            }
+            updateChips()
+        }
 
     /** Voice edit: what was selected when it started (null selection = write new text). */
     private data class EditTarget(val selection: String?, val start: Int, val end: Int, val generation: Int)
@@ -181,6 +206,15 @@ class VoiceInputIME : InputMethodService() {
         actionButton = view.findViewById(R.id.actionButton)
         micButton = view.findViewById(R.id.micButton)
         langButton = view.findViewById(R.id.langButton)
+        waveform = view.findViewById(R.id.waveform)
+        editChip = view.findViewById(R.id.editChip)
+        undoChip = view.findViewById(R.id.undoChip)
+        rawChip = view.findViewById(R.id.rawChip)
+        styleChip = view.findViewById(R.id.styleChip)
+        editChip?.setOnClickListener { haptic(it); startVoiceEdit() }
+        undoChip?.setOnClickListener { haptic(it); undoLast(useRuleText = false) }
+        rawChip?.setOnClickListener { haptic(it); undoLast(useRuleText = true) }
+        styleChip?.setOnClickListener { haptic(it); cycleStyle() }
 
         micButton?.setOnClickListener {
             haptic(it)
@@ -239,6 +273,8 @@ class VoiceInputIME : InputMethodService() {
         super.onStartInputView(editorInfo, restarting)
         RecognizerManager.initialize(this)
         updateLangButton()
+        updateStyleChip()
+        updateVisualState()
         stateJob?.cancel()
         stateJob = mainScope.launch {
             RecognizerManager.state.collect { refreshIdleStatus() }
@@ -569,6 +605,7 @@ class VoiceInputIME : InputMethodService() {
                     if (n == 0) continue
                     val samples = FloatArray(n) { buffer[it] / 32768.0f }
                     chunks.add(samples)
+                    feedWaveform(samples)
 
                     val now = System.currentTimeMillis()
                     if (rms(samples) > SILENCE_RMS) {
@@ -683,7 +720,9 @@ class VoiceInputIME : InputMethodService() {
                         }
                         if (n == 0) continue
                         queued.incrementAndGet()
-                        audio.send(FloatArray(n) { buffer[it] / 32768.0f })
+                        val samples = FloatArray(n) { buffer[it] / 32768.0f }
+                        feedWaveform(samples)
+                        audio.send(samples)
                     }
                 } finally {
                     try {
@@ -922,6 +961,7 @@ class VoiceInputIME : InputMethodService() {
                     }
                     if (n == 0) continue
                     val samples = FloatArray(n) { buffer[it] / 32768.0f }
+                    feedWaveform(samples)
                     stream.acceptWaveform(samples, SAMPLE_RATE)
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
                     // The Zipformer emits UPPER CASE without punctuation; cleanup re-capitalizes.
@@ -1246,9 +1286,8 @@ class VoiceInputIME : InputMethodService() {
         }
     }
 
-    /** Hooks for the keyboard's chips (undo, voice edit); filled in by the keyboard UI. */
-    private fun onInserted() = onSelectionChanged()
-    private fun onSelectionChanged() {}
+    private fun onInserted() = updateChips()
+    private fun onSelectionChanged() = updateChips()
 
     // ------------------------------------------------------------------- UI
 
@@ -1303,27 +1342,96 @@ class VoiceInputIME : InputMethodService() {
     }
 
     private fun setRecordingUi(active: Boolean) {
-        val button = micButton ?: return
-        if (active) {
-            pulse?.cancel() // never leave an old animator running
-            button.setBackgroundResource(R.drawable.bg_mic_recording)
-            pulse = ObjectAnimator.ofPropertyValuesHolder(
-                button,
-                PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.12f),
-                PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.12f),
-            ).apply {
-                duration = 500
-                repeatCount = ObjectAnimator.INFINITE
-                repeatMode = ObjectAnimator.REVERSE
-                start()
-            }
-        } else {
-            pulse?.cancel()
-            pulse = null
-            button.scaleX = 1f
-            button.scaleY = 1f
-            button.setBackgroundResource(R.drawable.bg_mic)
+        micButton?.setBackgroundResource(if (active) R.drawable.bg_mic_recording else R.drawable.bg_mic)
+        updateVisualState()
+    }
+
+    /** Waveform mode and chips follow recording / transcribing / polishing. Main thread. */
+    private fun updateVisualState() {
+        waveform?.mode = when {
+            recording -> WaveformView.Mode.LISTENING
+            transcribing || polishing -> WaveformView.Mode.WORKING
+            else -> WaveformView.Mode.IDLE
         }
+        updateChips()
+    }
+
+    /** Three ~33 ms levels per 100 ms chunk, so the bars move at ~30 Hz. Any thread. */
+    private fun feedWaveform(samples: FloatArray) {
+        val view = waveform ?: return
+        val part = samples.size / 3
+        if (part == 0) { view.pushRms(rms(samples)); return }
+        for (i in 0 until 3) {
+            var sum = 0.0
+            for (j in i * part until (i + 1) * part) sum += (samples[j] * samples[j]).toDouble()
+            view.pushRms(sqrt(sum / part).toFloat())
+        }
+    }
+
+    private fun undoTimeoutMs(): Long {
+        val am = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+        val base = 6000
+        return (am?.getRecommendedTimeoutMillis(base,
+            android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or
+                android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS) ?: base).toLong()
+    }
+
+    /** Edit chip with a selection; Undo / Raw for a few seconds after a dictation. */
+    private fun updateChips() {
+        val busy = recording || transcribing || polishing
+        val info = currentInputEditorInfo
+        val private = info != null && Privacy.isPrivateField(info.inputType, info.imeOptions)
+        editChip?.visibility =
+            if (!busy && !private && selStart >= 0 && selEnd > selStart) View.VISIBLE else View.GONE
+        val last = lastInsert
+        val undoable = !busy && last != null && last.generation == inputGeneration &&
+            SystemClock.uptimeMillis() < undoDeadline &&
+            (last.cursor == -1 || (selStart == last.cursor && selEnd == last.cursor))
+        undoChip?.visibility = if (undoable) View.VISIBLE else View.GONE
+        rawChip?.visibility = if (undoable && last?.alternative != null) View.VISIBLE else View.GONE
+    }
+
+    private fun styleName(style: String) = getString(when (style) {
+        Styles.VERBATIM -> R.string.style_verbatim
+        Styles.CASUAL -> R.string.style_casual
+        Styles.FORMAL -> R.string.style_formal
+        else -> R.string.style_clean
+    })
+
+    private fun categoryName(category: String?) = getString(when (category) {
+        "messaging" -> R.string.style_cat_messaging
+        "email" -> R.string.style_cat_email
+        "code" -> R.string.style_cat_code
+        "documents" -> R.string.style_cat_documents
+        else -> R.string.style_cat_other
+    })
+
+    /** The style chip shows this app's style; hidden when styles are off or in private fields. */
+    private fun updateStyleChip() {
+        val chip = styleChip ?: return
+        val info = currentInputEditorInfo
+        val cfg = StyleStore.load(this)
+        if (!cfg.enabled || (info != null && Privacy.isPrivateField(info.inputType, info.imeOptions))) {
+            chip.visibility = View.GONE
+            return
+        }
+        val name = styleName(Styles.styleFor(info?.packageName, cfg))
+        chip.text = name
+        chip.contentDescription = getString(R.string.cd_style_chip, name)
+        chip.visibility = View.VISIBLE
+    }
+
+    /** Next style for this app's category (or for other apps), saved like in the app's Styles screen. */
+    private fun cycleStyle() {
+        if (recording || transcribing) return
+        val pkg = currentInputEditorInfo?.packageName
+        val cfg = StyleStore.load(this)
+        val current = Styles.styleFor(pkg, cfg)
+        val next = Styles.ALL[(Styles.ALL.indexOf(current) + 1) % Styles.ALL.size]
+        val category = Styles.categoryFor(pkg, cfg)
+        StyleStore.save(this, if (category != null) cfg.withStyle(category, next) else cfg.copy(default = next))
+        updateStyleChip()
+        setStatus(getString(R.string.status_style_set, categoryName(category), styleName(next)))
     }
 
     private fun updateLangButton() {
