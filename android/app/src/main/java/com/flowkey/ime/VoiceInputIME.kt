@@ -1369,8 +1369,10 @@ class VoiceInputIME : InputMethodService() {
     }
 
     private fun undoTimeoutMs(): Long {
-        val am = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
         val base = 6000
+        // getRecommendedTimeoutMillis is API 29+; minSdk is 26.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return base.toLong()
+        val am = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
         return (am?.getRecommendedTimeoutMillis(base,
             android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or
                 android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS) ?: base).toLong()

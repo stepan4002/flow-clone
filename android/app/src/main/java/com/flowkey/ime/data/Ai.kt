@@ -73,13 +73,20 @@ object KeyVault {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    fun set(ctx: Context, slot: String, value: String) {
+    /** False when the Keystore refuses (broken on some devices); nothing is stored then. */
+    fun set(ctx: Context, slot: String, value: String): Boolean {
         val v = value.trim()
-        if (v.isEmpty()) { delete(ctx, slot); return }
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, key())
-        val blob = c.iv + c.doFinal(v.toByteArray(Charsets.UTF_8))
-        prefs(ctx).edit().putString(slot, Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+        if (v.isEmpty()) { delete(ctx, slot); return true }
+        return try {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.ENCRYPT_MODE, key())
+            val blob = c.iv + c.doFinal(v.toByteArray(Charsets.UTF_8))
+            prefs(ctx).edit().putString(slot, Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("FlowKeyAI", "Keystore could not encrypt the key: ${e.javaClass.simpleName}")
+            false
+        }
     }
 
     /** Null when missing or undecryptable (then the user re-enters it). */

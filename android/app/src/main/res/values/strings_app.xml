@@ -72,7 +72,7 @@
     <!-- History -->
     <string name="history_count">%1$d dictations on this phone</string>
     <string name="history_search">Search your dictations</string>
-    <string name="history_empty_long">No dictations yet. Everything you dictate is kept here, on this phone only.</string>
+    <string name="history_empty_long">No dictations yet. What you dictate is kept here on this phone (and in your phone\'s own backup, if backup is on). Password and incognito fields are never saved.</string>
     <string name="history_no_results">Nothing matches \"%1$s\".</string>
     <string name="history_clear_title">Clear all history?</string>
     <string name="history_clear_message">This deletes every saved dictation from this phone. Your stats stay.</string>
@@ -131,6 +131,7 @@
     <string name="ai_key_saved">•••••••• saved (type to replace)</string>
     <string name="ai_key_where">Encrypted on this phone, sent only to %1$s, never backed up.</string>
     <string name="ai_key_save">Save key</string>
+    <string name="ai_key_save_failed">This phone\'s secure key storage refused the key. Nothing was saved.</string>
     <string name="ai_test">Test</string>
     <string name="ai_testing">Testing…</string>
     <string name="ai_tone">Match the app\'s style</string>
@@ -140,7 +141,7 @@
 
     <string name="about_title">About</string>
     <string name="about_version">FlowKey %1$s</string>
-    <string name="about_privacy">Speech recognition runs entirely on this phone: audio never leaves it. History and stats stay on this phone. FlowKey has no account, no ads and no analytics.</string>
+    <string name="about_privacy">Speech recognition runs entirely on this phone: audio never leaves it. History and stats are stored on this phone; Android\'s own backup includes them if you turned backup on (API keys and models are never backed up). FlowKey has no account, no ads and no analytics.</string>
     <string name="about_licenses">MIT License. Speech recognition by sherpa-onnx (Apache-2.0) with OpenAI Whisper models (MIT) and Silero VAD (MIT).</string>
     <string name="about_source">Source code</string>
     <string name="about_url" translatable="false">https://github.com/stepan4002/flow-clone</string>

@@ -417,8 +417,13 @@ private fun AiCard(tick: Int) {
                 Button(enabled = keyInput.isNotBlank(), onClick = {
                     val k = keyInput
                     scope.launch {
-                        withContext(Dispatchers.IO) { KeyVault.set(ctx, slot, k) }
-                        keyInput = ""; keyChanges++; testResult = null
+                        val saved = withContext(Dispatchers.IO) { KeyVault.set(ctx, slot, k) }
+                        keyChanges++
+                        if (saved) {
+                            keyInput = ""; testResult = null
+                        } else {
+                            testResult = false to ctx.getString(R.string.ai_key_save_failed)
+                        }
                     }
                 }) { Text(stringResource(R.string.ai_key_save)) }
                 if (hasKey) OutlinedButton(onClick = {
