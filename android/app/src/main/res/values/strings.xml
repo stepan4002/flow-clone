@@ -38,6 +38,7 @@
     <string name="cd_globe">Switch keyboard</string>
     <string name="cd_settings">Open FlowKey setup</string>
     <string name="cd_language">Dictation language</string>
+    <string name="a11y_voice_edit">Voice edit: say how to change the selected text</string>
 
     <!-- Setup screen -->
     <string name="setup_headline">FlowKey setup</string>

@@ -165,6 +165,10 @@ class VoiceInputIME : InputMethodService() {
     )
     private var lastInsert: LastInsert? = null
 
+    /** Voice edit: what was selected when it started (null selection = write new text). */
+    private data class EditTarget(val selection: String?, val start: Int, val end: Int, val generation: Int)
+    private var editTarget: EditTarget? = null
+
     override fun onCreate() {
         super.onCreate()
         RecognizerManager.initialize(this)
@@ -181,6 +185,16 @@ class VoiceInputIME : InputMethodService() {
         micButton?.setOnClickListener {
             haptic(it)
             onMicTap()
+        }
+        micButton?.setOnLongClickListener {
+            haptic(it)
+            startVoiceEdit()
+            true
+        }
+        micButton?.let { mic ->
+            androidx.core.view.ViewCompat.addAccessibilityAction(mic, getString(R.string.a11y_voice_edit)) { _, _ ->
+                startVoiceEdit(); true
+            }
         }
         actionButton?.setOnClickListener { openSetup() }
         setupBackspace(view.findViewById(R.id.backspaceButton))
@@ -454,7 +468,12 @@ class VoiceInputIME : InputMethodService() {
             }
         }.also { job ->
             val appContext = applicationContext
-            job.invokeOnCompletion { RecognizerManager.sessionEnded(appContext) }
+            val target = editTarget
+            job.invokeOnCompletion {
+                RecognizerManager.sessionEnded(appContext)
+                // Only this session's target: a new voice edit may already have started.
+                if (target != null) mainScope.launch { if (editTarget === target) editTarget = null }
+            }
         }
         return true
     }
@@ -510,7 +529,8 @@ class VoiceInputIME : InputMethodService() {
 
     /** Default engine: live text when the VAD is bundled and enabled, else one batch decode. */
     private fun launchWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job {
-        liveSession = options.liveText && vadAvailable()
+        // A voice edit is an instruction, not text for the field: always one batch decode.
+        liveSession = editTarget == null && options.liveText && vadAvailable()
         return if (liveSession) {
             launchLiveWhisperSession(record, recognizer)
         } else {
@@ -528,13 +548,18 @@ class VoiceInputIME : InputMethodService() {
     private fun launchBatchWhisperSession(record: AudioRecord, recognizer: OfflineRecognizer): Job =
         mainScope.launch(Dispatchers.Default) {
             val opts = options
+            val edit = editTarget
+            // A voice edit never touches the field until the end: no "…" placeholder, which would
+            // replace the selection (and clearing it would delete the selected text).
+            val usePlaceholder = edit == null
+            fun clearPlaceholderIfUsed() { if (usePlaceholder) clearPlaceholder() }
             val chunks = ArrayList<FloatArray>()
             val buffer = ShortArray(CHUNK)
             var heardVoice = false
             val startedAt = System.currentTimeMillis()
             var lastVoiceAt = startedAt
             try {
-                withContext(Dispatchers.Main) { showPlaceholder() }
+                if (usePlaceholder) withContext(Dispatchers.Main) { showPlaceholder() }
                 while (recording && isActive) {
                     val n = record.read(buffer, 0, buffer.size)
                     if (n < 0) {
@@ -574,7 +599,7 @@ class VoiceInputIME : InputMethodService() {
             }
             if (!shouldCommit || !heardVoice) {
                 withContext(NonCancellable + Dispatchers.Main) {
-                    clearPlaceholder()
+                    clearPlaceholderIfUsed()
                     if (shouldCommit && !heardVoice) {
                         setStatus(getString(R.string.status_no_speech))
                     } else {
@@ -595,7 +620,7 @@ class VoiceInputIME : InputMethodService() {
                 Log.e(TAG, "Whisper transcription failed", t)
                 withContext(NonCancellable + Dispatchers.Main) {
                     transcribing = false
-                    clearPlaceholder()
+                    clearPlaceholderIfUsed()
                     setStatus(getString(R.string.status_engine_error, t.message ?: ""))
                 }
                 return@launch
@@ -603,12 +628,13 @@ class VoiceInputIME : InputMethodService() {
             if (result.text.isBlank()) {
                 withContext(NonCancellable + Dispatchers.Main) {
                     transcribing = false
-                    clearPlaceholder()
+                    clearPlaceholderIfUsed()
                     refreshIdleStatus()
                 }
             } else {
                 val seconds = chunks.sumOf { it.size }.toDouble() / SAMPLE_RATE
-                finishWhole(result.text, result.lang, seconds)
+                if (edit != null) finishVoiceEdit(result.text, result.lang, seconds, edit)
+                else finishWhole(result.text, result.lang, seconds)
             }
         }
 
@@ -1094,11 +1120,13 @@ class VoiceInputIME : InputMethodService() {
     }
 
     /** History + insights, never for private fields (passwords, incognito). Off the main thread. */
-    private fun record(text: String, raw: String, seconds: Double, style: String = sessionStyle) {
+    private fun record(text: String, raw: String, seconds: Double, style: String = sessionStyle,
+                       statsText: String = text) {
         if (sessionPrivate || text.isBlank()) return
         com.flowkey.ime.data.HistoryStore.add(
             this, HistoryFormat.newEntry(text, raw, sessionPkg, seconds, style))
-        StatsStore.add(this, text, seconds, sessionPkg)
+        // A voice edit counts the spoken instruction, not the AI's output, as dictated words.
+        StatsStore.add(this, statsText, seconds, sessionPkg)
     }
 
     /** Undo the last insertion (or swap in the rule text: [useRuleText]) if nothing changed since. */
@@ -1125,6 +1153,97 @@ class VoiceInputIME : InputMethodService() {
         ic.endBatchEdit()
         lastInsert = null
         onSelectionChanged()
+    }
+
+    // ------------------------------------------------------------- voice edit
+
+    /**
+     * Voice edit (Android's Command Mode): with text selected, say what to change ("make this
+     * more formal", "translate to German"); with nothing selected, say what to write. Needs AI.
+     */
+    private fun startVoiceEdit() {
+        if (recording || transcribing || sessionJob?.isCompleted == false) return
+        val info = currentInputEditorInfo
+        if (info != null && Privacy.isPrivateField(info.inputType, info.imeOptions)) {
+            setStatus(getString(R.string.status_voice_edit_private)); return
+        }
+        if (!AiPrefs.enabled(this) || !AiPrefs.client(this).configured()) {
+            showActionableStatus(getString(R.string.status_voice_edit_needs_ai)); return
+        }
+        if (!hasMicPermission()) {
+            showActionableStatus(getString(R.string.status_no_permission)); return
+        }
+        val engine = (RecognizerManager.state.value as? RecognizerManager.State.Ready)?.engine
+        if (engine == null) { onMicTap(); return }   // shows the loading / model status
+        if (engine is RecognizerManager.Engine.Streaming) {
+            setStatus(getString(R.string.status_voice_edit_whisper)); return
+        }
+        val ic = currentInputConnection ?: return
+        val hasSelection = selStart >= 0 && selEnd > selStart
+        val selected = if (hasSelection) ic.getSelectedText(0) else null
+        if (hasSelection && !com.flowkey.ime.core.SelectionGuard.complete(selected, selStart, selEnd)) {
+            // The app handed over only part of the selection: replacing it would delete the rest.
+            setStatus(getString(R.string.status_selection_changed)); return
+        }
+        editTarget = EditTarget(selected?.toString(), selStart, selEnd, inputGeneration)
+        RecognizerManager.sessionStarted()
+        val ready = (RecognizerManager.state.value as? RecognizerManager.State.Ready)?.engine
+        if (ready == null || !startDictation(ready)) {
+            editTarget = null
+            RecognizerManager.sessionEnded(this)
+            return
+        }
+        setStatus(getString(if (hasSelection) R.string.status_voice_edit else R.string.status_voice_write))
+    }
+
+    private suspend fun finishVoiceEdit(spoken: String, detectedLang: String?, seconds: Double, target: EditTarget) {
+        val instruction = withContext(Dispatchers.Main) {
+            setStatus(getString(R.string.status_polishing))
+            TextCleanup.process(spoken, true, dictionary, snippets, removeFillers = true,
+                punctuationCommands = false, commandLanguage = commandLanguage(detectedLang))
+        }
+        val client = AiPrefs.client(this)
+        aiCall = client
+        withContext(NonCancellable + Dispatchers.Main) { polishing = true }
+        val out = try {
+            withContext(Dispatchers.IO) {
+                client.rewrite(instruction, "", selection = target.selection, mode = "command", budgetMs = 15_000)
+            }
+        } finally {
+            aiCall = null
+            withContext(NonCancellable + Dispatchers.Main) { polishing = false }
+        }
+        withContext(NonCancellable + Dispatchers.Main) {
+            transcribing = false
+            val ic = currentInputConnection
+            when {
+                out == null -> setStatus(getString(R.string.status_ai_no_answer))
+                ic == null || !stillSameField() ||
+                    (target.selection != null && !com.flowkey.ime.core.SelectionGuard.unchanged(
+                        target.start, target.end, selStart, selEnd, target.generation, inputGeneration)) ->
+                    setStatus(getString(R.string.status_selection_changed))
+                target.selection != null -> {
+                    ic.beginBatchEdit()
+                    ic.setSelection(target.start, target.end)
+                    ic.commitText(out, 1)
+                    ic.endBatchEdit()
+                    lastInsert = LastInsert(out, null, target.selection, -1, inputGeneration)
+                    record(out, spoken, seconds, "command", statsText = instruction)
+                    onInserted()
+                    refreshIdleStatus()
+                }
+                else -> {
+                    val prefix = if (needLeadingSpace) " " else ""
+                    val inserted = prefix + LlmClient.matchCursor(out, capitalizeNext) + " "
+                    ic.commitText(inserted, 1)
+                    lastInsert = LastInsert(inserted, null, null, -1, inputGeneration)
+                    record(out, spoken, seconds, "command", statsText = instruction)
+                    needLeadingSpace = false
+                    onInserted()
+                    refreshIdleStatus()
+                }
+            }
+        }
     }
 
     /** Hooks for the keyboard's chips (undo, voice edit); filled in by the keyboard UI. */
