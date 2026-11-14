@@ -90,8 +90,16 @@ object HistoryStore {
         val app = ctx.applicationContext
         StoreScope.launch {
             synchronized(lock) {
-                val kept = HistoryFormat.parseAll(readLines(app)).filter { it.id != id }
-                runCatching { atomicWrite(file(app), kept.joinToString("") { it.toJsonLine() + "\n" }) }
+                runCatching {
+                    // Read errors abort the delete (readLines() would return nothing and the
+                    // rewrite would wipe the history); nothing to remove → no rewrite.
+                    val f = file(app)
+                    if (!f.exists()) return@runCatching
+                    val all = HistoryFormat.parseAll(f.readLines(Charsets.UTF_8))
+                    val kept = all.filter { it.id != id }
+                    if (kept.size == all.size) return@runCatching
+                    atomicWrite(f, kept.joinToString("") { it.toJsonLine() + "\n" })
+                }
             }
         }
     }
@@ -121,7 +129,9 @@ object HistoryStore {
             val existing = if (f.exists()) f.readText(Charsets.UTF_8) else ""
             atomicWrite(f, old.joinToString("") { it.toJsonLine() + "\n" } + existing)
             if (HistoryFormat.parseAll(f.readLines(Charsets.UTF_8)).size >= old.size) {
-                prefs.edit().remove("entries").apply()
+                // commit(), not apply(): if the process died before an async write reached the
+                // disk, the next start would migrate (and duplicate) the old entries again.
+                prefs.edit().remove("entries").commit()
             }
         } catch (e: Exception) {
             // keep the old data; try again next time

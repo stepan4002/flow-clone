@@ -77,10 +77,12 @@ fun modelStatus(state: RecognizerManager.State): Pair<String, Color> = when (sta
 
 @Composable
 fun SettingsScreen(tick: Int) {
+    // The streaming switch (Engine card) also changes what the Languages card shows.
+    var engineVersion by remember { mutableIntStateOf(0) }
     ScreenColumn {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
-        LanguagesCard(tick)
-        EngineCard(tick)
+        LanguagesCard(tick, engineVersion)
+        EngineCard(tick, onEngineChanged = { engineVersion++ })
         DownloadCard()
         DictationCard(tick)
         TextCard(tick)
@@ -93,14 +95,14 @@ fun SettingsScreen(tick: Int) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LanguagesCard(tick: Int) {
+private fun LanguagesCard(tick: Int, engineVersion: Int) {
     val ctx = LocalContext.current
     var changes by remember { mutableIntStateOf(0) }
     val enabled = remember(tick, changes) { Prefs.getEnabledLanguages(ctx) }
     val current = remember(tick, changes) { Prefs.getLanguage(ctx) }
     var adding by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    val streaming = remember(tick) { Prefs.isStreamingMode(ctx) }
+    val streaming = remember(tick, engineVersion) { Prefs.isStreamingMode(ctx) }
     @Composable fun label(code: String) =
         if (code == Languages.AUTO) stringResource(R.string.lang_auto_detect) else Languages.displayName(code)
 
@@ -184,7 +186,7 @@ private fun LanguagesCard(tick: Int) {
 // --------------------------------------------------------------------- engine
 
 @Composable
-private fun EngineCard(tick: Int) {
+private fun EngineCard(tick: Int, onEngineChanged: () -> Unit) {
     val ctx = LocalContext.current
     val state by RecognizerManager.state.collectAsState()
     var changes by remember { mutableIntStateOf(0) }
@@ -227,6 +229,7 @@ private fun EngineCard(tick: Int) {
             Prefs.setStreamingMode(ctx, it)
             RecognizerManager.initialize(ctx, force = true)
             changes++
+            onEngineChanged()
         }, subtitle = stringResource(R.string.setup_streaming_desc))
     }
 
@@ -335,7 +338,9 @@ private fun DictationCard(tick: Int) {
     SectionCard(stringResource(R.string.setup_settings_title)) {
         SettingSwitch(stringResource(R.string.setup_auto_stop_switch), autoStop, { Prefs.setAutoStopEnabled(ctx, it); changes++ })
         Text(stringResource(R.string.setup_auto_stop_duration), style = MaterialTheme.typography.labelLarge)
-        Segmented(Prefs.AUTO_STOP_CHOICES_MS.map { it to "%.1f s".format(it / 1000.0).replace(".0 s", " s") },
+        // "1.5 s" / "2 s" with the phone's own decimal separator
+        val seconds = remember { java.text.DecimalFormat("0.#") }
+        Segmented(Prefs.AUTO_STOP_CHOICES_MS.map { it to seconds.format(it / 1000.0) + " s" },
             autoStopMs, { Prefs.setAutoStopMs(ctx, it); changes++ }, enabled = autoStop)
         SettingSwitch(stringResource(R.string.setup_haptics_switch), haptics, { Prefs.setHapticsEnabled(ctx, it); changes++ })
         SettingSwitch(stringResource(R.string.setup_sound_switch), sound, { Prefs.setSoundEnabled(ctx, it); changes++ })
@@ -372,7 +377,7 @@ private fun AiCard(tick: Int) {
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     var testing by remember { mutableStateOf(false) }
     val slot = LlmClient.keySlot(cfg)
-    val hasKey = remember(slot, keyChanges, tick) { KeyVault.has(ctx, slot) }
+    val hasKey = remember(slot, keyChanges, tick) { KeyVault.stored(ctx, slot) } // no decrypt
     val cloud = cfg.provider != "ollama"
 
     fun save(new: LlmConfig) { cfg = new; AiPrefs.save(ctx, new); testResult = null }
@@ -436,7 +441,10 @@ private fun AiCard(tick: Int) {
             OutlinedButton(enabled = !testing, onClick = {
                 testing = true
                 scope.launch {
-                    testResult = withContext(Dispatchers.IO) { AiPrefs.client(ctx).test() }
+                    val tested = cfg to keyChanges
+                    val result = withContext(Dispatchers.IO) { AiPrefs.client(ctx).test() }
+                    // Changed the settings while it ran: that result is for the old ones.
+                    if (tested == (cfg to keyChanges)) testResult = result
                     testing = false
                 }
             }) { Text(stringResource(if (testing) R.string.ai_testing else R.string.ai_test)) }

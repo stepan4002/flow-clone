@@ -169,6 +169,13 @@ class LlmClientTest {
         assertEquals("openai@api.groq.com",
             LlmClient.keySlot(LlmConfig(provider = "openai", apiBase = "https://api.groq.com/openai/v1")))
         assertEquals("anthropic", LlmClient.keySlot(LlmConfig(provider = "anthropic")))
+        // java.net.URI can't read hosts with '_'; the official key must never go there
+        assertEquals("openai@llm_gateway.example.com",
+            LlmClient.keySlot(LlmConfig(provider = "openai", apiBase = "https://llm_gateway.example.com/v1")))
+        assertEquals("openai@invalid-address",
+            LlmClient.keySlot(LlmConfig(provider = "openai", apiBase = "https://evil.com\\.api.openai.com/v1")))
+        assertEquals("openai@invalid-address",
+            LlmClient.keySlot(LlmConfig(provider = "openai", apiBase = "not a url")))
     }
 
     @Test fun `bad answers give null, never an exception`() {

@@ -47,8 +47,26 @@ object AiPrefs {
     fun client(ctx: Context, transport: HttpTransport = HttpTransport(ctx)): LlmClient =
         LlmClient(config(ctx), transport) { slot -> KeyVault.get(ctx, slot) }
 
+    /**
+     * Like LlmClient.configured(), from the settings alone: no Keystore decrypt, so it is safe
+     * on the main thread (keyboard mic start, app screens). The real key is read when sending.
+     */
+    fun ready(ctx: Context): Boolean {
+        val cfg = config(ctx)
+        return when (cfg.provider.takeIf { it in LlmClient.DEFAULT_MODELS } ?: "ollama") {
+            "ollama" -> cfg.url.isNotBlank()
+            "openai" -> LlmClient.schemeOf(LlmClient.openaiBase(cfg)) == "http" ||
+                KeyVault.stored(ctx, LlmClient.keySlot(cfg.copy(provider = "openai")))
+            else -> KeyVault.stored(ctx, LlmClient.keySlot(cfg.copy(provider = "anthropic")))
+        }
+    }
+
     /** AI on, but a cloud provider has no key (e.g. after restoring a backup on a new phone). */
-    fun missingKey(ctx: Context): Boolean = enabled(ctx) && !client(ctx).configured()
+    fun missingKey(ctx: Context): Boolean {
+        if (!enabled(ctx)) return false
+        val provider = config(ctx).provider
+        return provider in setOf("openai", "anthropic") && !ready(ctx)
+    }
 }
 
 /**
@@ -103,6 +121,9 @@ object KeyVault {
     }
 
     fun has(ctx: Context, slot: String) = get(ctx, slot) != null
+
+    /** A key is saved in [slot] (no decrypt; get() can still fail if the Keystore lost it). */
+    fun stored(ctx: Context, slot: String) = prefs(ctx).contains(slot)
     fun delete(ctx: Context, slot: String) = prefs(ctx).edit().remove(slot).apply()
 }
 
@@ -146,6 +167,8 @@ class HttpTransport(ctx: Context) : LlmClient.Transport {
         val u = URL(url)
         val scheme = u.protocol.lowercase()
         val host = u.host
+        // The key slot was chosen for exactly this host (LlmClient.keySlot); refuse anything odd.
+        if (!LlmClient.plainHost(host.orEmpty().lowercase())) throw LlmClient.LlmError("unsupported address")
         var target = u
         if (scheme == "http") {
             val skipUntil = unreachable[host]
@@ -166,7 +189,7 @@ class HttpTransport(ctx: Context) : LlmClient.Transport {
             return attempt(target, u, scheme, headers, body, connectMs, readMs)
         } catch (e: java.io.IOException) {
             val dropped = e is java.net.ProtocolException || e is java.io.EOFException ||
-                (e is java.net.SocketException && e !is java.net.ConnectException)
+                (e is java.net.SocketException && !unreachableError(e))
             // The exception only (address and error), never the request or answer text.
             android.util.Log.w("FlowKeyAI", "POST to ${u.host} failed" + if (dropped) ", retrying" else "", e)
             if (!dropped || cancelled) throw e
@@ -181,6 +204,8 @@ class HttpTransport(ctx: Context) : LlmClient.Transport {
         val conn = target.openConnection() as HttpURLConnection
         current = conn
         try {
+            // A cancel() that came before `current` was set had nothing to disconnect.
+            if (cancelled) throw LlmClient.LlmError("cancelled")
             conn.requestMethod = "POST"
             conn.connectTimeout = connectMs
             conn.readTimeout = readMs
@@ -192,17 +217,23 @@ class HttpTransport(ctx: Context) : LlmClient.Transport {
             } catch (e: java.net.SocketTimeoutException) {
                 if (scheme == "http") unreachable[host] = System.currentTimeMillis() + SKIP_MS
                 throw e
-            } catch (e: java.net.ConnectException) {
-                if (scheme == "http") unreachable[host] = System.currentTimeMillis() + SKIP_MS
+            } catch (e: java.net.SocketException) {
+                if (scheme == "http" && unreachableError(e)) unreachable[host] = System.currentTimeMillis() + SKIP_MS
                 throw e
             }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (cancelled) throw LlmClient.LlmError("cancelled")
             return code to text
         } finally {
             conn.disconnect()
             current = null
         }
     }
+
+    /** The server can't be reached at all (refused, no route): skip it for a while, don't retry. */
+    private fun unreachableError(e: java.net.SocketException) =
+        e is java.net.ConnectException || e is java.net.NoRouteToHostException ||
+            e is java.net.BindException || e is java.net.PortUnreachableException
 }

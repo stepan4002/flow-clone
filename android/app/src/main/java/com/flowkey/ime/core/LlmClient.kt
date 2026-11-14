@@ -2,7 +2,7 @@ package com.flowkey.ime.core
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URI
+import java.net.URL
 
 /**
  * Optional AI rewrite — a port of the Windows app's windows/flowclone/llm.py: the same providers,
@@ -56,23 +56,36 @@ Output only the result text, no quotes or commentary."""
 
         fun openaiBase(cfg: LlmConfig): String = cfg.apiBase.trim().trimEnd('/').ifEmpty { OPENAI_BASE }
 
+        /** The host the request will go to: parsed with java.net.URL, like the transport does. */
         fun hostOf(url: String): String = try {
-            URI(url.trim()).host?.lowercase().orEmpty()
+            URL(url.trim()).host.orEmpty().lowercase()
         } catch (e: Exception) {
             ""
         }
 
         fun schemeOf(url: String): String = try {
-            URI(url.trim()).scheme?.lowercase().orEmpty()
+            URL(url.trim()).protocol.orEmpty().lowercase()
         } catch (e: Exception) {
             ""
         }
 
-        /** Where a key is stored: OpenAI-compatible services each get their own slot. */
+        /** A plain DNS name or IP literal; anything else (backslashes, '@', empty) gets no key. */
+        fun plainHost(host: String): Boolean =
+            host.isNotEmpty() && host.all { it in 'a'..'z' || it in '0'..'9' || it in ".-_:[]" }
+
+        /**
+         * Where a key is stored: OpenAI-compatible services each get their own slot, so a key is
+         * only ever sent to the host it was saved for. An address whose host can't be read
+         * gets a slot that never holds a key.
+         */
         fun keySlot(cfg: LlmConfig): String = when (cfg.provider) {
             "openai" -> {
                 val host = hostOf(openaiBase(cfg))
-                if (host.isEmpty() || host == "api.openai.com") "openai" else "openai@$host"
+                when {
+                    !plainHost(host) -> "openai@invalid-address"
+                    host == "api.openai.com" -> "openai"
+                    else -> "openai@$host"
+                }
             }
             else -> cfg.provider
         }

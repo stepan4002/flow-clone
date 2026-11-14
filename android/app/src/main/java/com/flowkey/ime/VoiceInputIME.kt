@@ -161,6 +161,12 @@ class VoiceInputIME : InputMethodService() {
 
     /** The AI call in flight (tap the mic to skip it), or null. */
     @Volatile private var aiCall: LlmClient? = null
+
+    /** The user tapped the mic during "Polishing…" (or the keyboard closed): use the rule text. */
+    @Volatile private var aiSkipped = false
+
+    /** What identifies the focused editor; a restartInput into a different one is a new field. */
+    private var currentEditorKey: String? = null
     @Volatile private var polishing = false
         set(value) {
             field = value
@@ -252,10 +258,31 @@ class VoiceInputIME : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
-        if (!restarting) {
+        // The selection of THIS editor (onUpdateSelection only reports later changes).
+        selStart = attribute?.initialSelStart ?: -1
+        selEnd = attribute?.initialSelEnd ?: -1
+        // WebView/Chrome move between web inputs with restartInput (restarting = true) on the
+        // same View id: compare what the editor is, so a pending result never lands in the
+        // next input (e.g. a password typed into a visible search box).
+        val key = attribute?.let {
+            listOf(it.packageName, it.fieldId, it.inputType, it.imeOptions, it.fieldName,
+                it.hintText?.toString(), it.label?.toString()).joinToString("\u0000")
+        }
+        val newField = !restarting || key != currentEditorKey
+        currentEditorKey = key
+        if (newField) {
             inputGeneration++
             lastInsert = null
+            if (restarting && sessionJob?.isCompleted == false) {
+                // onFinishInputView is not called for a restart: end the session like it does,
+                // without touching the new field (what was shown stays in the old one).
+                aiSkipped = true
+                aiCall?.cancel()
+                composingIsPlaceholder = false
+                stopDictation(commitPending = !liveSession)
+            }
         }
+        updateChips()
     }
 
     override fun onUpdateSelection(
@@ -282,6 +309,7 @@ class VoiceInputIME : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        aiSkipped = true
         aiCall?.cancel()   // the rule-cleaned text is kept instead
         lastInsert = null
         if (sessionJob?.isCompleted == false && liveSession) {
@@ -314,6 +342,7 @@ class VoiceInputIME : InputMethodService() {
 
     private fun onMicTap() {
         if (polishing) {
+            aiSkipped = true  // also covers the moment between the answer and the insert
             aiCall?.cancel()  // skip the AI: the rule-cleaned text is inserted right away
             return
         }
@@ -338,6 +367,7 @@ class VoiceInputIME : InputMethodService() {
                 // Count the session BEFORE taking the engine, so a reload finishing right now
                 // can't free it; then take the newest one.
                 RecognizerManager.sessionStarted()
+                editTarget = null // a plain dictation, even if a voice edit's cleanup is still queued
                 val engine = (RecognizerManager.state.value as? RecognizerManager.State.Ready)?.engine
                 if (engine == null || !startDictation(engine)) RecognizerManager.sessionEnded(this)
             }
@@ -462,8 +492,9 @@ class VoiceInputIME : InputMethodService() {
         sessionStyle = Styles.styleFor(sessionPkg, StyleStore.load(this))
         val verbatim = sessionStyle == Styles.VERBATIM
         sessionTone = AiPrefs.toneMatching(this)
+        // ready() reads settings only (no Keystore decrypt on the main thread / mic start).
         sessionAi = AiPrefs.enabled(this) && !sessionPrivate && !verbatim &&
-            engine is RecognizerManager.Engine.Whisper && AiPrefs.client(this).configured()
+            engine is RecognizerManager.Engine.Whisper && AiPrefs.ready(this)
         sessionGeneration = inputGeneration
         lastInsert = null
         options = SessionOptions(
@@ -883,8 +914,12 @@ class VoiceInputIME : InputMethodService() {
                         setRecordingUi(false)
                     }
                     // The AI (if on) only rewrites a take that was never split by an early commit.
-                    finishWhole(sessionRaw.toString(), null, history.end.toDouble() / SAMPLE_RATE,
-                                allowAi = !earlyCommitted, onCommitted = { finished = true })
+                    // After an early commit the tail is only part of the take: no AI, no casual
+                    // full-stop rule, and untimed (its audio length isn't known separately).
+                    finishWhole(sessionRaw.toString(), null,
+                                if (earlyCommitted) 0.0 else history.end.toDouble() / SAMPLE_RATE,
+                                allowAi = !earlyCommitted, whole = !earlyCommitted,
+                                onCommitted = { finished = true })
                     return@launch
                 }
                 withContext(NonCancellable + Dispatchers.Main) {
@@ -929,7 +964,8 @@ class VoiceInputIME : InputMethodService() {
                         val text = sessionRaw.toString()
                         if (text.isNotBlank()) {
                             val cleaned = clean(text, null)
-                            if (cleaned.isNotEmpty()) record(cleaned, text, history.end.toDouble() / SAMPLE_RATE)
+                            if (cleaned.isNotEmpty()) record(cleaned, text,
+                                if (earlyCommitted) 0.0 else history.end.toDouble() / SAMPLE_RATE)
                         }
                     }
                 }
@@ -952,6 +988,7 @@ class VoiceInputIME : InputMethodService() {
         mainScope.launch(Dispatchers.Default) {
             val stream = recognizer.createStream()
             val buffer = ShortArray(CHUNK)
+            var segmentSamples = 0L // audio of the current segment, for speaking-speed stats
             try {
                 while (recording && isActive) {
                     val n = record.read(buffer, 0, buffer.size)
@@ -962,14 +999,17 @@ class VoiceInputIME : InputMethodService() {
                     if (n == 0) continue
                     val samples = FloatArray(n) { buffer[it] / 32768.0f }
                     feedWaveform(samples)
+                    segmentSamples += n
                     stream.acceptWaveform(samples, SAMPLE_RATE)
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
                     // The Zipformer emits UPPER CASE without punctuation; cleanup re-capitalizes.
                     val text = recognizer.getResult(stream).text.lowercase()
                     if (recognizer.isEndpoint(stream)) {
                         recognizer.reset(stream)
+                        val seconds = segmentSamples.toDouble() / SAMPLE_RATE
+                        segmentSamples = 0
                         withContext(Dispatchers.Main) {
-                            if (text.isNotBlank()) commitSegment(text)
+                            if (text.isNotBlank()) commitSegment(text, seconds = seconds)
                             setStatus(getString(R.string.status_listening))
                         }
                     } else if (text.isNotBlank()) {
@@ -982,7 +1022,8 @@ class VoiceInputIME : InputMethodService() {
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
                     val text = recognizer.getResult(stream).text.lowercase()
                     withContext(NonCancellable + Dispatchers.Main) {
-                        if (text.isNotBlank()) commitSegment(text) else clearPlaceholder()
+                        if (text.isNotBlank()) commitSegment(text, seconds = segmentSamples.toDouble() / SAMPLE_RATE)
+                        else clearPlaceholder()
                     }
                 }
             } catch (t: Throwable) {
@@ -1018,11 +1059,13 @@ class VoiceInputIME : InputMethodService() {
 
     private fun clearPlaceholder() {
         composingIsPlaceholder = false
-        // Committing "" atomically removes the composing region.
-        currentInputConnection?.commitText("", 1)
+        // Committing "" atomically removes the composing region — but only in the session's
+        // field: in another one it would delete that field's selected text.
+        if (stillSameField()) currentInputConnection?.commitText("", 1)
     }
 
     private fun showPartial(partial: String) {
+        if (!stillSameField()) return
         val ic = currentInputConnection ?: return
         val prefix = if (needLeadingSpace) " " else ""
         ic.setComposingText(prefix + partial, 1)
@@ -1065,14 +1108,14 @@ class VoiceInputIME : InputMethodService() {
      * A part of a dictation (a streaming segment, or an early commit of a long live take): rule
      * cleanup only; the casual style's trailing-period rule waits for a whole dictation.
      */
-    private fun commitSegment(raw: String, detectedLang: String? = null) {
+    private fun commitSegment(raw: String, detectedLang: String? = null, seconds: Double = 0.0) {
         composingIsPlaceholder = false
         val cleaned = clean(raw, detectedLang)
         val ic = currentInputConnection
         if (ic == null || !stillSameField()) {
             // Focus moved on: never type into another field, but keep the text in history.
             Log.w(TAG, "Input field changed or closed; transcript kept in history only")
-            if (cleaned.isNotEmpty()) record(cleaned, raw, 0.0)
+            if (cleaned.isNotEmpty()) record(cleaned, raw, seconds)
             return
         }
         if (cleaned.isEmpty()) {
@@ -1082,7 +1125,7 @@ class VoiceInputIME : InputMethodService() {
         val prefix = if (needLeadingSpace) " " else ""
         val inserted = prefix + cleaned + " "
         ic.commitText(inserted, 1)
-        record(cleaned, raw, 0.0)
+        record(cleaned, raw, seconds)
         lastInsert = LastInsert(inserted, null, null, -1, inputGeneration)
         capitalizeNext = cleaned.last() in ".!?\n"
         needLeadingSpace = false
@@ -1095,16 +1138,20 @@ class VoiceInputIME : InputMethodService() {
      */
     private suspend fun finishWhole(
         raw: String, detectedLang: String?, seconds: Double,
-        allowAi: Boolean = true, onCommitted: () -> Unit = {},
+        allowAi: Boolean = true, whole: Boolean = true, onCommitted: () -> Unit = {},
     ) {
-        val ruled = withContext(Dispatchers.Main) {
-            Styles.finish(clean(raw, detectedLang), sessionStyle, wholeDictation = true)
+        // NonCancellable from here on: a session cancelled now (keyboard switched or destroyed
+        // while transcribing / polishing) still ends in commitFinal, which keeps the take in
+        // history when the field is gone.
+        val ruled = withContext(NonCancellable + Dispatchers.Main) {
+            Styles.finish(clean(raw, detectedLang), sessionStyle, wholeDictation = whole)
         }
         val (text, pressEnter) = PressEnter.extract(ruled)
         var final = text
         var polished = false
         if (allowAi && sessionAi && text.isNotBlank()) {
             val client = AiPrefs.client(this)
+            aiSkipped = false
             aiCall = client
             withContext(NonCancellable + Dispatchers.Main) {
                 polishing = true
@@ -1114,6 +1161,8 @@ class VoiceInputIME : InputMethodService() {
             val capitalize = capitalizeNext
             val out = try {
                 withContext(Dispatchers.IO) { client.rewrite(text, instruction, budgetMs = 10_000) }
+            } catch (e: CancellationException) {
+                null // cancelled: fall through to the rule text, still committed / kept below
             } finally {
                 aiCall = null
                 withContext(NonCancellable + Dispatchers.Main) { polishing = false }
@@ -1124,6 +1173,11 @@ class VoiceInputIME : InputMethodService() {
             }
         }
         withContext(NonCancellable + Dispatchers.Main) {
+            if (polished && aiSkipped) {
+                // The answer arrived just as the user skipped it: their choice wins.
+                final = text
+                polished = false
+            }
             onCommitted()
             transcribing = false
             commitFinal(final, raw, seconds, pressEnter, if (polished) text else null)
@@ -1207,7 +1261,7 @@ class VoiceInputIME : InputMethodService() {
         if (info != null && Privacy.isPrivateField(info.inputType, info.imeOptions)) {
             setStatus(getString(R.string.status_voice_edit_private)); return
         }
-        if (!AiPrefs.enabled(this) || !AiPrefs.client(this).configured()) {
+        if (!AiPrefs.enabled(this) || !AiPrefs.ready(this)) {
             showActionableStatus(getString(R.string.status_voice_edit_needs_ai)); return
         }
         if (!hasMicPermission()) {
@@ -1237,26 +1291,31 @@ class VoiceInputIME : InputMethodService() {
     }
 
     private suspend fun finishVoiceEdit(spoken: String, detectedLang: String?, seconds: Double, target: EditTarget) {
-        val instruction = withContext(Dispatchers.Main) {
+        val instruction = withContext(NonCancellable + Dispatchers.Main) {
             setStatus(getString(R.string.status_polishing))
             TextCleanup.process(spoken, true, dictionary, snippets, removeFillers = true,
                 punctuationCommands = false, commandLanguage = commandLanguage(detectedLang))
         }
         val client = AiPrefs.client(this)
+        aiSkipped = false
         aiCall = client
         withContext(NonCancellable + Dispatchers.Main) { polishing = true }
-        val out = try {
+        val answer = try {
             withContext(Dispatchers.IO) {
                 client.rewrite(instruction, "", selection = target.selection, mode = "command", budgetMs = 15_000)
             }
+        } catch (e: CancellationException) {
+            null
         } finally {
             aiCall = null
             withContext(NonCancellable + Dispatchers.Main) { polishing = false }
         }
         withContext(NonCancellable + Dispatchers.Main) {
             transcribing = false
+            val out = if (aiSkipped) null else answer
             val ic = currentInputConnection
             when {
+                out == null && aiSkipped -> refreshIdleStatus() // skipped: nothing changes
                 out == null -> setStatus(getString(R.string.status_ai_no_answer))
                 ic == null || !stillSameField() ||
                     (target.selection != null && !com.flowkey.ime.core.SelectionGuard.unchanged(
@@ -1268,7 +1327,7 @@ class VoiceInputIME : InputMethodService() {
                     ic.commitText(out, 1)
                     ic.endBatchEdit()
                     lastInsert = LastInsert(out, null, target.selection, -1, inputGeneration)
-                    record(out, spoken, seconds, "command", statsText = instruction)
+                    record(out, spoken, seconds, "command", statsText = spoken)
                     onInserted()
                     refreshIdleStatus()
                 }
@@ -1277,7 +1336,7 @@ class VoiceInputIME : InputMethodService() {
                     val inserted = prefix + LlmClient.matchCursor(out, capitalizeNext) + " "
                     ic.commitText(inserted, 1)
                     lastInsert = LastInsert(inserted, null, null, -1, inputGeneration)
-                    record(out, spoken, seconds, "command", statsText = instruction)
+                    record(out, spoken, seconds, "command", statsText = spoken)
                     needLeadingSpace = false
                     onInserted()
                     refreshIdleStatus()

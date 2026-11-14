@@ -35,7 +35,9 @@ import com.flowkey.ime.R
 import com.flowkey.ime.TextCleanup
 import com.flowkey.ime.core.StyleConfig
 import com.flowkey.ime.core.Styles
+import com.flowkey.ime.data.StoreScope
 import com.flowkey.ime.data.StyleStore
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -62,7 +64,9 @@ private fun styleOptions() = Styles.ALL.map { it to styleLabel(it) }
 @Composable
 fun StylesScreen(tick: Int) {
     val ctx = LocalContext.current
-    var cfg by remember(tick) { mutableStateOf(StyleStore.load(ctx)) }
+    // Also reload when the keyboard's style key changes a style while this screen is open.
+    val version by StoreScope.version.collectAsState()
+    var cfg by remember(tick, version) { mutableStateOf(StyleStore.load(ctx)) }
     var picking by remember { mutableStateOf<String?>(null) } // category to add an app to
 
     fun update(new: StyleConfig) { cfg = new; StyleStore.save(ctx, new) }
