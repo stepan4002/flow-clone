@@ -6,9 +6,12 @@
 # key that signed v1.0-v1.1, so phones update in place. Run create-release-key.ps1 once first.
 # Windows PowerShell 5.1.
 #
-# Usage:  powershell -ExecutionPolicy Bypass -File android\scripts\build-release.ps1 [-SkipNoModel]
+# Usage:  powershell -ExecutionPolicy Bypass -File android\scripts\build-release.ps1 [-SkipNoModel] [-TrustStore <jks>]
+#
+# -TrustStore: a Java truststore for networks that intercept TLS (Gradle downloads). Defaults to
+# %USERPROFILE%\.flowkey-build\truststore.jks when that file exists (password 'changeit').
 
-param([switch]$SkipNoModel)
+param([switch]$SkipNoModel, [string]$TrustStore = '')
 
 $ErrorActionPreference = 'Stop'
 
@@ -94,7 +97,15 @@ Write-Host "Gradle: $gradleCmd"
 function Invoke-Gradle([string[]]$extra = @()) {
     Push-Location $android
     try {
-        & $gradleCmd clean assembleRelease --no-daemon -q @extra
+        $ts = @()
+        if ($TrustStore -eq '') {
+            $default = Join-Path $env:USERPROFILE '.flowkey-build\truststore.jks'
+            if (Test-Path $default) { $TrustStore = $default }
+        }
+        if ($TrustStore -ne '') {
+            $ts = @("-Djavax.net.ssl.trustStore=$TrustStore", '-Djavax.net.ssl.trustStorePassword=changeit')
+        }
+        & $gradleCmd clean assembleRelease --no-daemon -q @ts @extra
         if ($LASTEXITCODE -ne 0) { throw 'gradle assembleRelease failed' }
     } finally {
         Pop-Location
