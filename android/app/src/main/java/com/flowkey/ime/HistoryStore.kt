@@ -1,58 +1,24 @@
 package com.flowkey.ime
 
 import android.content.Context
-import android.content.SharedPreferences
-import android.util.Log
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
+import com.flowkey.ime.core.HistoryFormat
 
-/** Local-only dictation history: the last [MAX_ENTRIES] committed transcripts. */
+/**
+ * Older API over the new history ([com.flowkey.ime.data.HistoryStore], JSON lines, 1000
+ * entries). Kept for the callers that only need text + time.
+ */
 object HistoryStore {
-
-    const val MAX_ENTRIES = 50
 
     data class Entry(val text: String, val timestamp: Long)
 
-    private const val TAG = "FlowKeyHistory"
-    private const val FILE = "flowkey_history"
-    private const val KEY_ENTRIES = "entries"
-
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-
-    fun getAll(context: Context): List<Entry> {
-        val json = prefs(context).getString(KEY_ENTRIES, null) ?: return emptyList()
-        return try {
-            val array = JSONArray(json)
-            (0 until array.length()).mapNotNull { i ->
-                array.optJSONObject(i)?.let { obj ->
-                    val text = obj.optString("text")
-                    if (text.isBlank()) null else Entry(text, obj.optLong("ts"))
-                }
-            }
-        } catch (e: JSONException) {
-            Log.w(TAG, "Corrupt history JSON; resetting", e)
-            emptyList()
-        }
-    }
+    fun getAll(context: Context): List<Entry> =
+        com.flowkey.ime.data.HistoryStore.entries(context).map { Entry(it.text, it.epochMillis()) }
 
     fun add(context: Context, text: String) {
         if (text.isBlank()) return
-        val trimmed = (listOf(Entry(text.trim(), System.currentTimeMillis())) + getAll(context))
-            .take(MAX_ENTRIES)
-        save(context, trimmed)
+        com.flowkey.ime.data.HistoryStore.add(
+            context, HistoryFormat.newEntry(text.trim(), text.trim(), null, 0.0, null))
     }
 
-    fun clear(context: Context) {
-        prefs(context).edit().remove(KEY_ENTRIES).apply()
-    }
-
-    private fun save(context: Context, entries: List<Entry>) {
-        val array = JSONArray()
-        for (entry in entries) {
-            array.put(JSONObject().put("text", entry.text).put("ts", entry.timestamp))
-        }
-        prefs(context).edit().putString(KEY_ENTRIES, array.toString()).apply()
-    }
+    fun clear(context: Context) = com.flowkey.ime.data.HistoryStore.clear(context)
 }

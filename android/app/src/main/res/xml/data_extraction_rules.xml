@@ -5,10 +5,12 @@
         <exclude domain="external" path="model/" />
         <exclude domain="file" path="hotwords/" />
         <exclude domain="sharedpref" path="flowkey_runtime.xml" />
+        <exclude domain="sharedpref" path="flowkey_secrets.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="external" path="model/" />
         <exclude domain="file" path="hotwords/" />
         <exclude domain="sharedpref" path="flowkey_runtime.xml" />
+        <exclude domain="sharedpref" path="flowkey_secrets.xml" />
     </device-transfer>
 </data-extraction-rules>

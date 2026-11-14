@@ -5,4 +5,5 @@
     <exclude domain="external" path="model/" />
     <exclude domain="file" path="hotwords/" />
     <exclude domain="sharedpref" path="flowkey_runtime.xml" />
+    <exclude domain="sharedpref" path="flowkey_secrets.xml" />
 </full-backup-content>

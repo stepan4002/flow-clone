@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain http is allowed here only so a home AI server (Ollama, LM Studio) on the local network
+     works. The app enforces the real rule in code (data/Ai.kt HttpTransport): http only to
+     loopback / private / link-local addresses, checked after resolving the name; API keys are
+     never sent over http. Everything else uses https. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
