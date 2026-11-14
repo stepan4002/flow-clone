@@ -3,6 +3,7 @@ package com.flowkey.ime.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -87,7 +88,7 @@ fun FlowKeyApp(tick: Int) {
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when (Tab.entries[tab]) {
                 Tab.HOME -> HomeScreen(tick, onOpenHistory = { tab = Tab.HISTORY.ordinal },
                     onOpenSettings = { tab = Tab.SETTINGS.ordinal })

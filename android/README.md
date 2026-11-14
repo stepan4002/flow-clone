@@ -2,22 +2,42 @@
 
 A voice-only Android keyboard (IME) in the spirit of Wispr Flow, but with speech
 recognized **entirely on the phone**. Tap the mic and speak in **any of 99 languages**
-(English, Czech, French and Spanish are preset; add any other in Setup) or let it
+(English, Czech, French and Spanish are preset; add any other in Settings) or let it
 auto-detect. The words appear while you talk, and the cleaned-up text is typed into
 whatever app has focus.
 
+<p align="center">
+  <img src="../docs/img/android-home.png" alt="Home: words dictated, day streak, speaking speed, time saved, 30-day chart" width="24%">
+  <img src="../docs/img/android-keyboard.png" alt="The keyboard while listening" width="24%">
+  <img src="../docs/img/android-history.png" alt="Searchable history" width="24%">
+  <img src="../docs/img/android-styles.png" alt="Styles per app" width="24%">
+</p>
+
 **Privacy by construction:** your audio is recognized on the device and never leaves it.
-No analytics, no accounts. Since v1.2 the app holds the `INTERNET` permission for exactly
-one feature: the optional higher-accuracy model, downloaded **only when you tap Download**
-in Setup, from fixed HTTPS URLs on huggingface.co (redirected to its download servers),
-with every file checked against a pinned SHA-256. Nothing else in the app connects anywhere.
+No analytics, no accounts. The app holds the `INTERNET` permission for two features that are
+off until you turn them on:
+
+- the optional higher-accuracy model, downloaded **only when you tap Download**, from fixed
+  HTTPS URLs on huggingface.co (redirected to its download servers), with every file checked
+  against a pinned SHA-256;
+- the optional **AI rewrite / voice edit** (Settings → AI): it sends the **text** of a
+  dictation (and, for voice edit, the selected text) to the provider *you* configure — your
+  own Ollama server on your network, or a cloud API with your own key. Never audio. Plain
+  `http://` is only allowed to addresses on your own network; keys are encrypted with an
+  Android Keystore key, are never sent over http, and are excluded from backups.
+
+Password fields and fields that ask for no personalized learning (incognito) never use AI and
+are never saved to history or stats. Nothing else in the app connects anywhere.
+
+**Backups:** history (`history.jsonl`) and insights (`stats.json`) are part of Android's
+normal app backup, like the settings; API keys and the speech models are not.
 
 ## Features
 
 - Voice-only keyboard panel: big mic button, backspace (hold to repeat), enter, space,
   keyboard switcher (globe), settings, and a language key (AUTO + your languages)
 - **99 languages** with the built-in multilingual Whisper model (sherpa-onnx). Add or
-  remove languages in Setup; no download needed
+  remove languages in Settings; no download needed
 - **Live text in every language:** a voice detector (Silero VAD) splits your speech into
   phrases. Each phrase is transcribed while you keep talking, and the text shows live in
   the field
@@ -30,9 +50,20 @@ with every file checked against a pinned SHA-256. Nothing else in the app connec
 - Optional extra: **higher-accuracy model** (Whisper small, ~375 MB in-app download)
 - Text cleanup: filler-word removal, "scratch that", capitalization, smart spacing
 - Personal dictionary (always-fix corrections) and snippets (spoken trigger → expansion)
-- Dictation history (last 50 transcripts, tap to copy, local only)
+- **Styles per app** (the same as the Windows app): casual in chat apps, formal in email,
+  verbatim in code apps, clean everywhere else. The **style key** on the keyboard shows and
+  changes the current app's style
+- Optional **AI rewrite**: Ollama on your network, any OpenAI-compatible API or Anthropic,
+  with your own key. Off by default; tap the mic while "Polishing…" to skip it
+- **Voice edit**: select text, tap **✨ Edit** (or long-press the mic) and say "make this
+  shorter" or "translate to German". With nothing selected, say what to write
+- **Undo** chip right after a dictation (and **Raw** to swap the AI version for your own words)
+- Say "press enter" to send
+- The app: **Home** (setup checklist, words, day streak, speaking speed, time saved, 30-day
+  chart, top apps, recent dictations), searchable **History** (up to 1000 dictations, local
+  only), **Dictionary** (your words, corrections, snippets), **Styles**, **Settings** — Jetpack
+  Compose, dark and light
 - Haptic and sound cues on start/stop (both can be disabled)
-- Material 3 setup app that follows dark mode, adaptive launcher icon
 
 ---
 
@@ -119,28 +150,28 @@ it, and allow "install unknown apps". It installs as **FlowKey debug**.
 
 ### 6. First launch
 
-Open **FlowKey**. The setup checklist walks you through:
+Open **FlowKey**. The setup checklist on Home walks you through:
 
 1. **Speech model**: will say "not found" until step 7 (unless you bundled the models)
-2. **Microphone**: tap *Grant microphone*
+2. **Microphone**: tap *Allow*
 3. **Enable keyboard**: opens system settings; turn on *FlowKey*.
    Android shows a standard warning for any third-party keyboard. FlowKey never sends
    what you type or say anywhere.
-4. **Switch keyboard**: shows the keyboard chooser; pick *FlowKey*
+4. **Switch to FlowKey**: tap *Choose* and pick *FlowKey*
 
 ### 7. Copy the model to the phone
 
 Copy the three Whisper files to
 `Android/data/com.flowkey.ime/files/model/whisper/` (for a debug build:
 `com.flowkey.ime.debug`), by USB file transfer or `adb push`. The exact commands are in
-[MODELS.md](MODELS.md). Then tap **Re-check** in FlowKey setup.
+[MODELS.md](MODELS.md). Then tap **Re-check** in FlowKey → Settings → Engine.
 It should say **"Whisper model loaded ✓"** (the first load takes a few seconds).
 
 ### 8. Dictate
 
 1. Tap any text field and switch to FlowKey via the keyboard chooser (or the globe key on
    your current keyboard)
-2. Tap the **mic**. It turns red and pulses
+2. Tap the **mic**. It turns red, and a waveform and a ring follow your voice
 3. Speak. The words appear (underlined) as you go. Stop talking for ~2.5 s, or tap the mic
    again, and the text is finalized
 4. The **language key** (bottom-left) cycles AUTO and the languages you enabled
@@ -176,7 +207,7 @@ Notes:
 - Filler sounds are removed (hmm, uh, ehm everywhere; "um"/"er" in English, "euh" in
   French, "eh" in Czech and Slovak — never real words like Portuguese "um" or German "er").
   This can be turned off in settings.
-- **Your words**: add names and terms in Setup. They get your exact spelling, close
+- **Your words**: add names and terms in the Dictionary tab. They get your exact spelling, close
   misspellings of longer words are fixed (can be turned off), and English streaming mode
   boosts them during recognition. To avoid "fixing" grammar, close-misspelling fixes are off
   in languages with case endings (Czech, Slovak, Polish, …), word forms with an added ending
@@ -186,9 +217,13 @@ Notes:
   counts as one of your words.
 - **Snippets**: say the trigger phrase, get the expansion (e.g. "my address" → your full
   address).
-- **History**: Setup → History shows your last 50 transcripts; tap one to copy.
+- **History**: the History tab keeps up to 1000 dictations on the phone; search, copy,
+  delete, or add a misheard name to your words.
+- **Styles**: each app category has a style (Styles tab); the keyboard's style key cycles
+  the current app's category. Verbatim keeps your words exactly as spoken.
+- **Voice edit** needs AI (Settings → AI) and the Whisper engine (not English streaming).
 
-### Settings (in the setup app)
+### Settings (in the app's Settings tab)
 
 - **Languages**: add any of 99 languages to the language key, or remove them
 - Default language: the same as the keyboard's language key
@@ -202,7 +237,9 @@ Notes:
 - **Extra: higher-accuracy model**: download Whisper small (~375 MB) and switch to it. It
   is 2–3× slower, and most useful for languages the built-in model handles less well.
   Delete it any time
-- **Your words**, Dictionary, Snippets
+- **AI rewrite and voice edit**: provider, address or API key, model, *Test*, and whether the
+  AI follows the app's style
+- **Your words**, Corrections and Snippets are in the Dictionary tab
 
 ---
 
@@ -218,8 +255,8 @@ Notes:
 | Text appears late on a slow phone | Live text re-transcribes the current phrase now and then. Turn **Live text** off to transcribe once at the end, or switch back from the higher-accuracy model. |
 | "Download failed …" | Check the connection and tap **Resume download**. It continues where it stopped. "Not enough free space" needs ~430 MB free. |
 | "Word boosting turned off" | The English streaming engine crashed while loading your words. Streaming keeps working without them; edit your words to try again. |
-| Mic button says "Grant microphone in setup" | Open setup → Grant microphone. If you previously chose "Don't allow", enable it in Android Settings → Apps → FlowKey → Permissions. |
-| FlowKey not in the keyboard list | It must be *enabled* first: setup step 3 → toggle FlowKey on, then use the chooser (step 4). |
+| Mic button says "Grant microphone in setup" | Open FlowKey → Home → Microphone access → Allow. If you previously chose "Don't allow", enable it in Android Settings → Apps → FlowKey → Permissions. |
+| FlowKey not in the keyboard list | It must be *enabled* first: Home → *Turn on the FlowKey keyboard*, then *Switch to FlowKey* → Choose. |
 | Keyboard stops working after a while in background | Some OEMs (Xiaomi/MIUI, Huawei, Samsung "sleeping apps") kill background apps aggressively. Exclude FlowKey from battery optimization: Settings → Battery → allow FlowKey. |
 | First dictation after opening the keyboard is delayed | The model loads once per process ("Loading model…"); later dictations are fast. |
 | Auto-stop triggers while you think | Increase the silence duration in settings, or disable auto-stop (then only tapping the mic stops). |
@@ -280,13 +317,20 @@ app/src/main/java/com/flowkey/ime/
 ├── Languages.kt           Whisper's 99 language codes, names, language-key cycle.
 ├── Prefs.kt               Settings (+ crash-guard flags in a separate, never-backed-up file).
 ├── UserData.kt            Dictionary, snippets and your words (JSON in SharedPreferences).
-├── HistoryStore.kt        Last 50 transcripts, local-only JSON.
-├── SetupActivity.kt       Onboarding checklist + all settings UI.
-└── HistoryActivity.kt     Transcript list, tap-to-copy, clear-all.
+├── WaveformView.kt        The keyboard's level bars / ring / working arc around the mic.
+├── SetupActivity.kt       Hosts the Compose app; crash-notice dialogs.
+├── core/                  Pure Kotlin, JVM-tested: Styles, PressEnter, StatsCalc,
+│                          HistoryFormat (the Windows app's history.jsonl format),
+│                          Guards (privacy, local addresses, undo, selection), LlmClient.
+├── data/                  Stores.kt: history.jsonl, stats.json, styles (one background
+│                          writer thread); Ai.kt: AI settings, KeyVault (Keystore), the
+│                          HTTP transport with the local-address rule.
+└── ui/                    Compose screens: Home, History, Dictionary, Styles, Settings.
 ```
 
 Pure logic (cleanup, commands, languages, word correction, hotwords, live timing, download
-decisions) is unit-tested on the JVM: `./gradlew testDebugUnitTest`, which also runs in CI.
+decisions, styles, stats, history format, AI client and guards) is unit-tested on the JVM:
+`./gradlew testDebugUnitTest`, which also runs in CI.
 
 Threading model: audio is read on its own coroutine into an unbounded channel, so slow
 decoding never drops audio. Decoding runs on `Dispatchers.Default`, and every

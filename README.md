@@ -55,6 +55,14 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | i
 </p>
 <p align="center"><img src="docs/img/windows-pill.png" alt="The status pill: live waveform, transcribing, model download, errors" width="320"></p>
 
+<p align="center">
+  <img src="docs/img/android-home.png" alt="FlowKey for Android: Home with words dictated, day streak, speaking speed, time saved and a 30-day chart" width="19%">
+  <img src="docs/img/android-keyboard.png" alt="The FlowKey keyboard while listening: waveform and ring around the mic, style key" width="19%">
+  <img src="docs/img/android-history.png" alt="History: search, copy, delete, add a word" width="19%">
+  <img src="docs/img/android-styles.png" alt="Styles per app category" width="19%">
+  <img src="docs/img/android-settings.png" alt="Settings: text rules and optional AI rewrite" width="19%">
+</p>
+
 | | Windows — **FlowClone** | Android — **FlowKey** |
 |---|---|---|
 | Dictate into **any app** | Push-to-talk **Ctrl+Win** (or double-tap for hands-free) | Voice keyboard (IME): tap the mic |
@@ -62,18 +70,18 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | i
 | Languages | **EN · CS · FR · ES** + 21 more, auto-detected | **99 languages** — EN · CS · FR · ES preset, add any other in Setup |
 | Live text | — (push-to-talk, text appears on release) | words appear **while you speak**, in every language |
 | Cleanup | fillers, spoken punctuation, *“scratch that”*, capitalization, *“press enter”* | fillers, spoken punctuation in **10 languages**, *“scratch that”*, smart spacing |
-| **Styles per app** | verbatim in code, casual in chat, formal in email — rules offline, AI-rewritten when enabled | — |
-| **Command Mode** | select text, hold **Ctrl+Win+Shift**, say *“make this shorter”* (needs AI) | — |
-| AI rewrite (optional) | local **Ollama**, or your own key for any OpenAI-compatible API or Anthropic | — |
-| Insights | words per day, streak, speaking speed, time saved, top apps | — |
+| **Styles per app** | verbatim in code, casual in chat, formal in email — rules offline, AI-rewritten when enabled | ✅ the same, plus a style key on the keyboard |
+| **Command Mode** | select text, hold **Ctrl+Win+Shift**, say *“make this shorter”* (needs AI) | **Voice edit**: select text, tap ✨ Edit or long-press the mic (needs AI) |
+| AI rewrite (optional) | local **Ollama**, or your own key for any OpenAI-compatible API or Anthropic | the same (Ollama on your network); key encrypted with the Android Keystore |
+| Insights | words per day, streak, speaking speed, time saved, top apps | ✅ the same |
 | Personal dictionary & snippets | ✅ | ✅ + **“Your words”**: names and jargon spelled your way and boosted in recognition |
-| History | ✅ searchable, paste again, delete + paste-last / copy-last hotkeys | ✅ last 50 |
-| Network access | to download the model once — and to your AI provider only if you pick a cloud one | only if you tap **Download** for the optional higher-accuracy model |
+| History | ✅ searchable, paste again, delete + paste-last / copy-last hotkeys | ✅ searchable (1000), copy, delete, **Undo** chip right after dictating |
+| Network access | to download the model once — and to your AI provider only if you pick a cloud one | only for the optional higher-accuracy model download — and your AI provider if you turn AI on |
 
 ## 🔒 Privacy
 
 - Audio is recorded, transcribed and cleaned **on your device**. There is no FlowClone server, no telemetry, no analytics.
-- Android: speech is recognized entirely on the phone; audio never leaves it. The `INTERNET` permission is used for one thing only — the optional higher-accuracy model, downloaded from Hugging Face when *you* tap Download in Setup (fixed HTTPS URLs, checksum-verified). No analytics, no accounts.
+- Android: speech is recognized entirely on the phone; audio never leaves it. The `INTERNET` permission is used for two things you turn on yourself: the optional higher-accuracy model, downloaded from Hugging Face when *you* tap Download (fixed HTTPS URLs, checksum-verified), and the optional AI rewrite — your own Ollama on your network, or a cloud API with your own key, which then receives the **text** of your dictations (never audio). Keys are encrypted with the Android Keystore and never backed up; password and incognito fields never use AI and are never stored. No analytics, no accounts.
 - Windows: the only network calls are the one-time speech-model download from Hugging Face (pinned to an exact model version and checked with SHA-256, saved in `%LOCALAPPDATA%\FlowClone\models`) and — only if you turn on AI rewrite — calls to the AI provider *you* choose: your own Ollama on `localhost` (stays on the PC), or a cloud API with your own key, which then receives the **text** of your dictations (never audio). API keys are kept in Windows Credential Manager.
 - Your settings, dictionary and history stay in `%APPDATA%\FlowClone` (Windows) or the app's private storage (Android).
 
@@ -158,7 +166,7 @@ your settings and history gone.
 
 - [x] Command mode — select text, say *“make this more formal”* (Windows)
 - [x] New Windows app: insights, searchable history, styles per app, onboarding
-- [ ] Android: the same design, insights and styles
+- [x] Android: the same design, insights, styles, AI rewrite and voice edit
 - [x] Standalone `FlowClone.exe` installer
 - [ ] Code signing for the Windows installer
 - [x] Spoken punctuation commands in Czech, French, Spanish and 6 more languages (Android)

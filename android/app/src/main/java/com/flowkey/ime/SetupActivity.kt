@@ -60,4 +60,10 @@ class SetupActivity : ComponentActivity() {
         }
         tick.intValue++
     }
+
+    /** The keyboard picker is a dialog (no onResume): re-check setup when it closes. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) tick.intValue++
+    }
 }

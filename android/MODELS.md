@@ -4,7 +4,7 @@ FlowKey runs speech recognition **on-device** with [sherpa-onnx](https://github.
 
 **Using the release `FlowKey.apk`? You need nothing from this page:** it already contains
 both speech models and the voice detector. The optional higher-accuracy model (Whisper small)
-is downloaded from inside the app (Setup → *Extra: higher-accuracy model*).
+is downloaded from inside the app (Settings → *Extra: higher-accuracy model*).
 
 This page is for building FlowKey yourself, or for `FlowKey-no-model.apk`:
 
@@ -48,7 +48,7 @@ Pick ONE:
 | Model | Download | Size (int8) | Recommendation |
 |---|---|---|---|
 | **whisper-base** (multilingual) | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2 | ~80 MB | Start here. Good quality, works on mid-range phones. |
-| **whisper-small** (multilingual) | Use **Setup → Extra: higher-accuracy model** in the app | ~375 MB | Better quality, 2–3× slower. The app downloads it into its internal storage (not reachable over USB) and checks every file's SHA-256. |
+| **whisper-small** (multilingual) | Use **Settings → Extra: higher-accuracy model** in the app | ~375 MB | Better quality, 2–3× slower. The app downloads it into its internal storage (not reachable over USB) and checks every file's SHA-256. |
 
 More models: https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html
 

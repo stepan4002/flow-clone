@@ -39,6 +39,26 @@ versioning: [SemVer](https://semver.org/).
 - "Open history file" works on a fresh install
 - The speech model size is ~670 MB (was documented as ~330 MB)
 
+### Android — FlowKey
+- **New app** (Jetpack Compose, dark and light theme): **Home** with a setup checklist and
+  insights (words, day streak, speaking speed, time saved, 30-day chart, top apps, recent
+  dictations), searchable **History** (now up to 1000 dictations), **Dictionary** with Words,
+  Corrections and Snippets you can edit, **Styles** and **Settings**
+- **Styles per app**, the same as on Windows: casual in chat apps, formal in email, verbatim
+  in code apps, clean everywhere else; change them in the app or with the new style key on the
+  keyboard
+- **Optional AI rewrite** with Ollama on your network, any OpenAI-compatible API or Anthropic,
+  with your own key encrypted by the Android Keystore and never backed up; off by default,
+  tap the mic to skip it, falls back to the rule-cleaned text on any error
+- **Voice edit**: select text, tap ✨ Edit (or long-press the mic) and say "make this more
+  formal" or "translate to German"; with nothing selected it writes what you ask for
+- **Redesigned keyboard**: live waveform and a voice-following ring around a bigger mic,
+  style key, **Undo** after a dictation (and **Raw** to swap the AI version for your own words)
+- Say "press enter" to send
+- Password and incognito fields never store history, never count in stats and never use AI
+- History and stats use the Windows app's formats (`history.jsonl`, `stats.json`); the old
+  history is moved over on first start
+
 ### Project
 - Windows UI moved from Tk / pystray / Pillow to Qt 6 (PySide6-Essentials, LGPL; notices and
   licence texts are shipped with the app)

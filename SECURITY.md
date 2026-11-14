@@ -8,7 +8,14 @@
   (`ModelDownloader.kt`) fetches fixed HTTPS URLs on huggingface.co (which redirect to
   Hugging Face's download servers) and rejects any file whose SHA-256 does not match the
   pinned hash. The model is stored in the app's internal storage, out of reach of other apps.
-  Nothing else in the app opens a connection.
+  Since v1.3 the optional **AI rewrite / voice edit** (off by default) also connects — only to
+  the provider you configure: your own Ollama server (plain `http://` is allowed only when the
+  name resolves to a private or loopback address, and the app connects to that resolved
+  address) or a cloud API over HTTPS, which then receives the dictated text and, for voice
+  edit, the selected text — never audio. API keys are encrypted with an Android Keystore key
+  (`KeyVault` in `data/Ai.kt`), are excluded from backup and device transfer, and are never
+  sent over plain http. Password and no-personalized-learning (incognito) fields never use AI
+  and are never written to history or stats. Nothing else in the app opens a connection.
 - **Android releases** are signed with a dedicated release key (APK Signature Scheme v3, with
   key rotation from the debug key that signed v1.0–v1.1). Debug builds are a separate app
   (`com.flowkey.ime.debug`).
