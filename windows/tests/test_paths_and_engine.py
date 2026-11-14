@@ -97,11 +97,11 @@ def test_build_requirements_cover_runtime_requirements():
 
 
 def test_autostart_command_files(tmp_path):
-    from flowclone import hub
+    from flowclone import autostart
     py, script = tmp_path / "pythonw.exe", tmp_path / "run.py"
-    assert hub._command_files(f'"{py}" "{script}"') == [str(py), str(script)]
+    assert autostart._command_files(f'"{py}" "{script}"') == [str(py), str(script)]
     exe = tmp_path / "Program Files" / "FlowClone.exe"
     exe.parent.mkdir()
     exe.write_bytes(b"")
-    assert hub._command_files(str(exe)) == [str(exe)]          # unquoted, with a space
-    assert hub._command_files(f'"{exe}"') == [str(exe)]
+    assert autostart._command_files(str(exe)) == [str(exe)]          # unquoted, with a space
+    assert autostart._command_files(f'"{exe}"') == [str(exe)]

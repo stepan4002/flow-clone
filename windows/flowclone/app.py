@@ -88,7 +88,7 @@ class FlowApp:
             return
         self.tray.start()
         try:
-            from .hub import ensure_autostart_current
+            from .autostart import ensure_autostart_current
             ensure_autostart_current()
         except Exception:
             self.log.exception("autostart check failed")
