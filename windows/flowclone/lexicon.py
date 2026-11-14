@@ -40,16 +40,45 @@ def _load(path, default):
         return dict(default)
 
 
+def _mtime(path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 class Lexicon:
     def __init__(self):
         self.reload()
 
     def reload(self):
         d = _load(DICTIONARY_PATH, _DEFAULT_DICTIONARY)
-        self.words: list[str] = d.get("words", [])
-        self.corrections: dict = d.get("corrections", {})
-        self.replacements: dict = d.get("replacements", {})
-        self.snippets: dict = _load(SNIPPETS_PATH, _DEFAULT_SNIPPETS)
+        self.words: list[str] = list(d.get("words", []))
+        self.corrections: dict = dict(d.get("corrections", {}))
+        self.replacements: dict = dict(d.get("replacements", {}))
+        self.snippets: dict = dict(_load(SNIPPETS_PATH, _DEFAULT_SNIPPETS))
+        self._stamp = (_mtime(DICTIONARY_PATH), _mtime(SNIPPETS_PATH))
+
+    def reload_if_changed(self) -> bool:
+        """Pick up hand edits of dictionary.json / snippets.json (checked before each dictation)."""
+        if (_mtime(DICTIONARY_PATH), _mtime(SNIPPETS_PATH)) != self._stamp:
+            self.reload()
+            log.info("dictionary/snippets reloaded")
+            return True
+        return False
+
+    def save_dictionary(self, words: list[str], corrections: dict, replacements: dict):
+        DICTIONARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        DICTIONARY_PATH.write_text(json.dumps(
+            {"words": words, "corrections": corrections, "replacements": replacements},
+            indent=2, ensure_ascii=False), encoding="utf-8")
+        self.reload()
+
+    def save_snippets(self, snippets: dict):
+        SNIPPETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNIPPETS_PATH.write_text(json.dumps(snippets, indent=2, ensure_ascii=False),
+                                 encoding="utf-8")
+        self.reload()
 
     @staticmethod
     def _replace_phrase(text: str, phrase: str, replacement: str) -> str:
