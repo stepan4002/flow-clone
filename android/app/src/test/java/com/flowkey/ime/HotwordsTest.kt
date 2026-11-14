@@ -30,7 +30,7 @@ class HotwordsTest {
     }
 
     @Test fun `vocab must belong to the model tokens`() {
-        val dir = createTempDir()
+        val dir = kotlin.io.path.createTempDirectory().toFile()
         try {
             val tokens = File(dir, "tokens.txt").apply { writeText("<blk> 0\n▁THE 1\nS 2\n#0 3\n") }
             val good = File(dir, "good.vocab").apply { writeText("<blk>\t0.0\n▁THE\t-1.0\nS\t-2.0\n") }
