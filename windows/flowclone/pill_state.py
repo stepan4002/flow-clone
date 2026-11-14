@@ -15,7 +15,7 @@ from dataclasses import dataclass
 # would otherwise be invisible.
 ALWAYS_SHOWN = frozenset({"downloading", "model_error"})
 STATES = ("hidden", "recording", "hands_free", "command", "processing", "loading",
-          "downloading", "model_error")
+          "downloading", "model_error", "info")
 LEVEL_INTERVAL_S = 1 / 30
 
 

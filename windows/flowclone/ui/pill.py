@@ -35,7 +35,7 @@ _DEFAULT_TEXT = {
 _COLORS = {
     "recording": "#E5484D", "hands_free": "#E5484D", "command": "#9B7BFF",
     "processing": "#F0A020", "loading": "#4C6FFF", "downloading": "#4C6FFF",
-    "model_error": "#E5484D",
+    "model_error": "#E5484D", "info": "#4C6FFF",
 }
 _PCT = re.compile(r"(\d{1,3})%")
 

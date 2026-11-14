@@ -9,9 +9,11 @@ log = logging.getLogger("flowclone")
 
 
 class Recorder:
-    def __init__(self, sample_rate: int = 16000, device=None):
+    def __init__(self, sample_rate: int = 16000, device=None, on_level=None):
         self.sample_rate = sample_rate
         self.device = device
+        self.on_level = on_level      # called with the RMS level of each block (waveform)
+        self.level = 0.0
         self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
@@ -35,7 +37,15 @@ class Recorder:
     def _callback(self, indata, frames, time_info, status):
         if status:
             log.warning("audio: %s", status)
-        self._chunks.append(indata[:, 0].copy())
+        block = indata[:, 0].copy()
+        self._chunks.append(block)
+        if block.size:
+            self.level = float(np.sqrt(np.mean(block * block)))
+            if self.on_level is not None:
+                try:
+                    self.on_level(self.level)
+                except Exception:
+                    pass
 
     def stop(self) -> np.ndarray:
         with self._lock:

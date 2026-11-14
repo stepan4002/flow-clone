@@ -18,6 +18,13 @@ import multiprocessing  # noqa: E402
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
+    # Load ONNX Runtime before Qt: both ship the MSVC runtime (msvcp140.dll) and the copy
+    # loaded first wins; onnxruntime needs the newer one (an older one crashes it).
+    try:
+        import onnxruntime  # noqa: F401
+    except Exception:
+        pass  # reported properly by the self-test / the engine loader
+
     if "--selftest" in sys.argv:
         try:
             from flowclone.selftest import main as selftest_main
@@ -48,7 +55,9 @@ if __name__ == "__main__":
     crash.install(LOG_DIR)
     try:
         from flowclone.app import main
-        main()
+        sys.exit(main())
+    except SystemExit:
+        raise
     except Exception as e:
         import logging
         logging.getLogger("flowclone").critical("FlowClone could not start", exc_info=True)
