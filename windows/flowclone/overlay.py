@@ -31,8 +31,14 @@ class Overlay:
         self.show_pill = show_pill
         self._q: queue.Queue = queue.Queue()
         self._pulse_on = False
-        self._state = "hidden"
+        self._state = "hidden"          # last state applied on the tk thread
+        self._requested = "hidden"      # last state requested by any thread
+        self._seq = 0                   # request counter (guarded by _lock)
+        self._lock = threading.Lock()
         self._flash_id = None
+        self._flash_seq = -1
+        # The download / model-error pill stays up: a flash shown over it returns to it.
+        self._sticky: tuple[str, str | None] | None = None
         self.root: tk.Tk | None = None
         self._ready = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="ui").start()
@@ -41,15 +47,21 @@ class Overlay:
     # ---- thread-safe API ----
 
     def set_state(self, state: str, message: str | None = None, flash_ms: int = 0):
-        self._q.put(("state", state, message, flash_ms))
+        with self._lock:
+            self._seq += 1
+            self._requested = state
+            self._q.put(("state", state, message, flash_ms, self._seq))
 
     @property
     def state(self) -> str:
-        return self._state
+        """The most recently requested state (not yet necessarily on screen), so a
+        background thread never decides from a state that a newer request replaced."""
+        with self._lock:
+            return self._requested
 
     def schedule(self, fn):
         """Run fn() on the tkinter thread (used by tray to open the Hub)."""
-        self._q.put(("call", fn, None, None))
+        self._q.put(("call", fn, None, None, None))
 
     # ---- tk thread ----
 
@@ -57,6 +69,9 @@ class Overlay:
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.title("FlowClone")
+        # Tk swallows callback errors to stderr, which is null in FlowClone.exe.
+        self.root.report_callback_exception = (
+            lambda et, ev, tb: log.error("UI callback failed", exc_info=(et, ev, tb)))
         try:  # default icon for every FlowClone window (the Hub included)
             from . import paths
             self.root.iconbitmap(default=str(paths.resource("assets/flowclone.ico")))
@@ -91,12 +106,23 @@ class Overlay:
         sh = self.pill.winfo_screenheight()
         self.pill.geometry(f"360x40+{(sw - 360) // 2}+{sh - 116}")
 
-    def _apply_state(self, state, message, flash_ms):
-        self._state = state
+    def _apply_state(self, state, message, flash_ms, seq):
         # A flash scheduled for an earlier message must not hide this one.
         if self._flash_id is not None:
             self.pill.after_cancel(self._flash_id)
             self._flash_id = None
+        if state in _ALWAYS_SHOWN:
+            self._sticky = (state, message)
+        elif not flash_ms:
+            self._sticky = None
+        if flash_ms:
+            # Scheduled even when the pill is off, so the state always returns.
+            self._flash_seq = seq
+            self._flash_id = self.pill.after(flash_ms, self._flash_done)
+        self._show(state, message)
+
+    def _show(self, state, message):
+        self._state = state
         if state == "hidden" or (not self.show_pill and state not in _ALWAYS_SHOWN):
             self.pill.withdraw()
             return
@@ -105,13 +131,14 @@ class Overlay:
         self.pill.deiconify()
         self.pill.attributes("-topmost", True)
         self._place()
-        if flash_ms:
-            self._flash_id = self.pill.after(flash_ms, self._flash_done)
 
     def _flash_done(self):
         self._flash_id = None
-        self._state = "hidden"
-        self.pill.withdraw()
+        state, message = self._sticky or ("hidden", None)
+        with self._lock:
+            if self._seq == self._flash_seq:  # nothing newer was requested meanwhile
+                self._requested = state
+        self._show(state, message)
 
     def _fit(self, text: str) -> str:
         """Ellipsize text that would not fit on the pill."""
@@ -130,9 +157,12 @@ class Overlay:
     def _poll(self):
         try:
             while True:
-                kind, a, b, c = self._q.get_nowait()
+                kind, a, b, c, d = self._q.get_nowait()
                 if kind == "state":
-                    self._apply_state(a, b, c)
+                    try:
+                        self._apply_state(a, b, c, d)
+                    except Exception:
+                        log.exception("pill update failed")
                 elif kind == "call":
                     try:
                         a()

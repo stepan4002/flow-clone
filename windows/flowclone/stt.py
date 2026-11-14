@@ -29,8 +29,13 @@ class ParakeetEngine:
         # Only ever pass a complete, verified folder: with an existing `path` onnx_asr works
         # offline and a partial folder would fail; a missing one would make it download
         # into the folder on its own, unverified.
-        self.model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", path=str(model_dir),
-                                         quantization="int8")
+        try:
+            self.model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", path=str(model_dir),
+                                             quantization="int8")
+        except Exception:
+            # Possibly a file damaged after it was verified: re-check every file on retry.
+            model_store.invalidate(model_dir)
+            raise
         log.info("Parakeet ready")
 
     def transcribe(self, audio, sample_rate: int, hint_words=None, language=None) -> str:

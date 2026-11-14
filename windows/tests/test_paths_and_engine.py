@@ -94,3 +94,14 @@ def test_build_requirements_cover_runtime_requirements():
     runtime = names(REPO / "windows" / "requirements.txt") - {"faster-whisper"}
     build = names(REPO / "windows" / "requirements-build.txt")
     assert runtime <= build, f"missing from requirements-build.txt: {runtime - build}"
+
+
+def test_autostart_command_files(tmp_path):
+    from flowclone import hub
+    py, script = tmp_path / "pythonw.exe", tmp_path / "run.py"
+    assert hub._command_files(f'"{py}" "{script}"') == [str(py), str(script)]
+    exe = tmp_path / "Program Files" / "FlowClone.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"")
+    assert hub._command_files(str(exe)) == [str(exe)]          # unquoted, with a space
+    assert hub._command_files(f'"{exe}"') == [str(exe)]

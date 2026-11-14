@@ -68,12 +68,14 @@ def is_complete(target: Path | None = None) -> bool:
                for n, (size, _) in FILES.items())
 
 
-def _verify_and_mark(target: Path) -> bool:
-    """Hash every file; delete any that don't match (so they are fetched again)."""
+def _verify_and_mark(target: Path, known_good: frozenset = frozenset()) -> bool:
+    """Hash every file (except `known_good` ones, hashed moments ago); delete any that
+    don't match, so they are fetched again."""
     ok = True
     for name, (size, digest) in FILES.items():
         f = target / name
-        if not f.is_file() or f.stat().st_size != size or sha256_of(f) != digest:
+        if not f.is_file() or f.stat().st_size != size or (
+                name not in known_good and sha256_of(f) != digest):
             ok = False
             if f.exists():
                 log.warning("%s does not match the expected model file; removing it", name)
@@ -81,6 +83,12 @@ def _verify_and_mark(target: Path) -> bool:
     if ok:
         (target / MARKER).write_text(REVISION, encoding="utf-8")
     return ok
+
+
+def invalidate(target: Path | None = None) -> None:
+    """Forget that the folder was verified (e.g. the model failed to load): the next
+    ensure() hashes every file again and replaces the damaged ones."""
+    (target or target_dir()).joinpath(MARKER).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------- seeding from the HF cache
@@ -93,18 +101,31 @@ def hf_cache_root() -> Path:
     return Path.home() / ".cache" / "huggingface" / "hub"
 
 
-def _cached_file(name: str) -> Path | None:
+def _cached_candidates(name: str) -> list[Path]:
+    """Cache files with the right name and size (not hashed yet)."""
     snapshots = hf_cache_root() / ("models--" + REPO.replace("/", "--")) / "snapshots"
     if not snapshots.is_dir():
-        return None
-    size, digest = FILES[name]
+        return []
+    size, _ = FILES[name]
+    found = []
     for snap in sorted(snapshots.iterdir()):
         candidate = snap / name
         if not candidate.exists():
             continue
         real = Path(os.path.realpath(candidate))  # cache snapshots are symlinks into blobs
         try:
-            if real.stat().st_size == size and sha256_of(real) == digest:
+            if real.stat().st_size == size:
+                found.append(real)
+        except OSError:
+            continue
+    return found
+
+
+def _cached_file(name: str) -> Path | None:
+    _, digest = FILES[name]
+    for real in _cached_candidates(name):
+        try:
+            if sha256_of(real) == digest:
                 return real
         except OSError:
             continue
@@ -114,6 +135,8 @@ def _cached_file(name: str) -> Path | None:
 def seed_from_hf_cache(target: Path | None = None) -> bool:
     """Reuse verified files from the Hugging Face cache (hardlink; copy if that fails)."""
     target = target or target_dir()
+    if not all(_cached_candidates(name) for name in FILES):
+        return False  # incomplete cache: don't hash 650 MB for nothing
     found = {}
     for name in FILES:
         real = _cached_file(name)
@@ -122,15 +145,17 @@ def seed_from_hf_cache(target: Path | None = None) -> bool:
         found[name] = real
     target.mkdir(parents=True, exist_ok=True)
     for name, real in found.items():
-        dst = target / name
-        if dst.exists():
-            dst.unlink()
+        tmp = target / (name + ".seed")
+        tmp.unlink(missing_ok=True)
         try:
-            os.link(real, dst)
+            try:
+                os.link(real, tmp)
+            except OSError:
+                shutil.copy2(real, tmp)
+            os.replace(tmp, target / name)
         except OSError:
-            tmp = target / (name + ".seed")
-            shutil.copy2(real, tmp)
-            os.replace(tmp, dst)
+            tmp.unlink(missing_ok=True)
+            raise
     (target / MARKER).write_text(REVISION, encoding="utf-8")
     log.info("speech model reused from the Hugging Face cache (%s)", hf_cache_root())
     return True
@@ -184,7 +209,7 @@ def _fetch(name: str, target: Path, progress: _Progress, cancel_event, session) 
     part_len = part.stat().st_size if part.exists() else 0
     if part_len > size:
         part.unlink()
-        progress.add(-part_len)
+        progress.add(-size)  # download() counted min(part_len, size)
         part_len = 0
     if part_len < size:
         headers = {"Range": f"bytes={part_len}-"} if part_len else {}
@@ -232,27 +257,47 @@ def download(progress_cb=None, cancel_event=None, target: Path | None = None, se
         need_mb = (remaining + SPARE_BYTES) // 1_000_000
         raise ModelError(f"Not enough disk space for the speech model: {need_mb} MB needed",
                          f"not enough disk space ({need_mb} MB)")
-    if session is None:
+    own_session = session is None
+    if own_session:
         # See run.py: an antivirus-set SSLKEYLOGFILE makes Python's OpenSSL abort on Windows.
         os.environ.pop("SSLKEYLOGFILE", None)
         import requests  # deferred (tests inject a fake session)
         session = requests.Session()
-    progress = _Progress(progress_cb, have)
-    progress.add(0, force=True)
-    for name, (size, _) in FILES.items():
-        final = target / name
-        if final.is_file() and final.stat().st_size == size:
-            continue
-        try:
-            _fetch(name, target, progress, cancel_event, session)
-        except ModelError:
-            raise
-        except Exception as e:  # network errors: keep the .part, the next attempt resumes
-            raise ModelError(f"download of {name} failed: {e}", _short_network_reason(e)) from e
-    if not _verify_and_mark(target):
-        raise ModelError("downloaded model failed verification", "verification failed")
-    progress.add(0, force=True)
-    return target
+    try:
+        progress = _Progress(progress_cb, have)
+        progress.add(0, force=True)
+        fetched = set()
+        for name, (size, _) in FILES.items():
+            final = target / name
+            if final.is_file() and final.stat().st_size == size:
+                continue
+            try:
+                _fetch(name, target, progress, cancel_event, session)
+                fetched.add(name)
+            except ModelError:
+                raise
+            except Exception as e:  # keep the .part: the next attempt resumes
+                raise ModelError(f"download of {name} failed: {e}", _short_reason(e)) from e
+        if not _verify_and_mark(target, frozenset(fetched)):
+            raise ModelError("downloaded model failed verification", "verification failed")
+        progress.add(0, force=True)
+        return target
+    finally:
+        if own_session:
+            session.close()
+
+
+def _short_reason(e: Exception) -> str:
+    """Network problems vs. local file problems (requests' errors are OSErrors too)."""
+    import errno
+    if isinstance(e, OSError) and not type(e).__module__.startswith(("requests", "urllib3")):
+        if e.errno == errno.ENOSPC:
+            return "disk full"
+        if isinstance(e, PermissionError):
+            return "model file locked (antivirus?)"
+        if getattr(e, "filename", None):  # a file operation, not a socket
+            return "could not save the model files"
+    return _short_network_reason(e)
 
 
 def _short_network_reason(e: Exception) -> str:

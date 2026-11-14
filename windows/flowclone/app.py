@@ -4,9 +4,12 @@ Hold the hotkey (default Ctrl+Win), speak, release: cleaned-up text appears in
 whatever app is focused. Double-tap the hotkey for hands-free mode. Everything
 runs on your machine — no cloud, no account, no word limits.
 """
+import getpass
+import os
 import socket
 import threading
 import time
+import zlib
 
 from . import audio, cleanup, config as cfg, inject
 from .foreground import get_foreground_app
@@ -22,7 +25,17 @@ from .stats import Stats
 from .stt import create_engine
 from .tray import Tray
 
-_SINGLE_INSTANCE_PORT = 47831
+def _user_tag() -> str:
+    try:
+        return f"{os.environ.get('USERDOMAIN', '')}\\{getpass.getuser()}".lower()
+    except Exception:
+        return "unknown"
+
+
+# Loopback ports are shared by every signed-in Windows user: derive the port from the
+# user so a second user's FlowClone doesn't find (and poke) the first user's copy.
+_USER_TAG = _user_tag()
+_SINGLE_INSTANCE_PORT = 47831 + zlib.crc32(_USER_TAG.encode("utf-8")) % 1000
 # Named mutex created only by FlowClone.exe, so the installer can detect (and close) a
 # running exe without confusing it with a source/pythonw run.
 _EXE_MUTEX = "Local\\FlowCloneExe"
@@ -69,8 +82,9 @@ class FlowApp:
             self.log.info("FlowClone is already running — asking it to show the Hub.")
             if not _ask_running_instance_to_show():
                 from .crash import show_fatal
-                show_fatal("FlowClone is already running.\n\n"
-                           "Look for its microphone icon in the system tray.")
+                show_fatal("FlowClone could not start: it looks like it is already running, "
+                           f"or another program uses its local port {_SINGLE_INSTANCE_PORT}."
+                           "\n\nLook for the microphone icon in the system tray.")
             return
         self.tray.start()
         try:
@@ -101,6 +115,13 @@ class FlowApp:
     def quit(self):
         self._cancel_download.set()  # a running download stops at the next chunk (resumable)
         self._quit.set()
+        # Stop answering "show" right away, so a relaunch during shutdown starts fresh.
+        lock, self._instance_lock = self._instance_lock, None
+        if lock is not None:
+            try:
+                lock.close()
+            except OSError:
+                pass
 
     def _acquire_single_instance(self) -> bool:
         try:
@@ -123,15 +144,17 @@ class FlowApp:
 
     def _serve_instance_requests(self):
         """A second launch connects here and sends 'show': bring up the Hub."""
-        while not self._quit.is_set():
+        lock = self._instance_lock
+        while lock is not None and not self._quit.is_set():
             try:
-                conn, _addr = self._instance_lock.accept()
+                conn, _addr = lock.accept()
             except OSError:
                 return
             with conn:
                 try:
                     conn.settimeout(2)
-                    if conn.recv(16).strip() == b"show":
+                    if conn.recv(64).strip() == b"show" and not self._quit.is_set():
+                        conn.sendall(_handshake())
                         self.open_hub()
                 except OSError:
                     pass
@@ -180,8 +203,11 @@ class FlowApp:
             self.log.error("speech model unavailable: %s (to install it by hand, put the "
                            "model files into %s)", e, _model_target())
         except Exception as e:  # engine load failure is fatal for dictation
+            if self._quit.is_set():
+                return
             self.model_failed = True
             self.tray.refresh_menu()
+            self.tray.set_tooltip("FlowClone — speech model failed to load (see log)")
             self.overlay.set_state("model_error", f"Model load failed: {e}")
             self.log.exception("engine load failed")
 
@@ -203,19 +229,25 @@ class FlowApp:
             return
         if self.recording:
             return
-        if not self._engine_ready.is_set():
-            # Don't record into the void while the model is still downloading/loading.
-            if self.model_failed:
-                msg = "Speech model missing — tray menu → Retry download"
-            elif self._model_pct:
-                msg = f"Speech model not ready yet ({self._model_pct}%)"
-            else:
-                msg = "Speech model still loading…"
-            self.overlay.set_state("processing", msg, flash_ms=2500)
-            self.sounds.play("error")
+        if not self._engine_usable():
             return
         self._press_time = time.time()
         self._start_recording()
+
+    def _engine_usable(self) -> bool:
+        """False (with feedback) while the model is downloading, loading or failed:
+        don't record into the void."""
+        if self._engine_ready.is_set():
+            return True
+        if self.model_failed:
+            msg = "Speech model missing — tray menu → Retry download"
+        elif self._model_pct:
+            msg = f"Speech model not ready yet ({self._model_pct}%)"
+        else:
+            msg = "Speech model still loading…"
+        self.overlay.set_state("processing", msg, flash_ms=2500)
+        self.sounds.play("error")
+        return False
 
     def _on_ptt_release(self):
         if self.hands_free or not self.recording:
@@ -251,11 +283,11 @@ class FlowApp:
             self._start_hands_free()
 
     def _start_hands_free(self):
-        if self.recording:
+        if self.recording or not self._engine_usable():
             return
-        self.hands_free = True
         self._hands_free_deadline = time.time() + self.config["hands_free_max_minutes"] * 60
         self._start_recording(state="hands_free")
+        self.hands_free = self.recording  # stays off if the mic failed to start
 
     def _stop_hands_free(self, discard: bool = False):
         self.hands_free = False
@@ -361,11 +393,17 @@ class FlowApp:
             inject.copy_to_clipboard(last)
 
 
+def _handshake() -> bytes:
+    return f"flowclone {_USER_TAG}\n".encode("utf-8")
+
+
 def _ask_running_instance_to_show() -> bool:
+    """True only if a FlowClone of this same user answered (not some other program)."""
     try:
         with socket.create_connection(("127.0.0.1", _SINGLE_INSTANCE_PORT), timeout=2) as c:
+            c.settimeout(3)
             c.sendall(b"show\n")
-        return True
+            return c.recv(256) == _handshake()
     except OSError:
         return False
 

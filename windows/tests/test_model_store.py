@@ -208,3 +208,76 @@ def test_progress_is_throttled():
     now[0] = 0.3
     p.add(10)
     assert calls == [10, 30]
+
+
+def _cache(tmp_path, monkeypatch, files):
+    snap = tmp_path / "hub" / ("models--" + ms.REPO.replace("/", "--")) / "snapshots" / "abc"
+    snap.mkdir(parents=True)
+    for n, b in files.items():
+        (snap / n).write_bytes(b)
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
+    return snap
+
+
+def test_failed_seed_copy_keeps_existing_file_and_cleans_up(tmp_path, small_files, monkeypatch):
+    _cache(tmp_path, monkeypatch, small_files)
+    target = tmp_path / "model"
+    target.mkdir()
+    (target / "a.onnx").write_bytes(small_files["a.onnx"])
+
+    def no_link(*a):
+        raise OSError("cross-device")
+
+    def disk_full(src, dst):
+        open(dst, "wb").write(b"x" * 10)
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ms.os, "link", no_link)
+    monkeypatch.setattr(ms.shutil, "copy2", disk_full)
+    with pytest.raises(OSError):
+        ms.seed_from_hf_cache(target)
+    assert (target / "a.onnx").read_bytes() == small_files["a.onnx"]  # not deleted first
+    assert not list(target.glob("*.seed"))                            # no partial leftovers
+
+
+def test_incomplete_cache_is_not_hashed(tmp_path, small_files, monkeypatch):
+    _cache(tmp_path, monkeypatch, {"a.onnx": small_files["a.onnx"]})  # b.txt missing
+    monkeypatch.setattr(ms, "sha256_of", lambda p: pytest.fail("hashed an incomplete cache"))
+    assert not ms.seed_from_hf_cache(tmp_path / "model")
+
+
+def test_fresh_download_hashes_each_file_once(tmp_path, small_files, monkeypatch):
+    real, seen = ms.sha256_of, []
+    monkeypatch.setattr(ms, "sha256_of", lambda p: seen.append(p.name) or real(p))
+    ms.download(target=tmp_path, session=FakeSession(small_files))
+    assert sorted(seen) == ["a.onnx.part", "b.txt.part"]
+    assert ms.is_complete(tmp_path)
+
+
+def test_oversized_part_keeps_progress_exact(tmp_path, small_files):
+    (tmp_path / "a.onnx.part").write_bytes(b"Z" * 7000)  # bigger than the 5000-byte file
+    reports = []
+    ms.download(lambda done, total: reports.append((done, total)),
+                target=tmp_path, session=FakeSession(small_files))
+    assert all(done >= 0 for done, _ in reports)
+    assert reports[-1][0] == reports[-1][1]
+
+
+def test_invalidate_makes_retry_recheck_files(tmp_path, small_files, monkeypatch):
+    monkeypatch.setattr(ms, "target_dir", lambda: tmp_path)
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty"))
+    ms.download(target=tmp_path, session=FakeSession(small_files))
+    (tmp_path / "a.onnx").write_bytes(b"B" * 5000)  # same size, damaged after verification
+    assert ms.is_complete(tmp_path)
+    ms.invalidate(tmp_path)
+    real_download = ms.download
+    monkeypatch.setattr(ms, "download", lambda cb, ev, target: real_download(
+        cb, ev, target, session=FakeSession(small_files)))
+    assert ms.ensure() == tmp_path
+    assert (tmp_path / "a.onnx").read_bytes() == small_files["a.onnx"]
+
+
+def test_local_file_errors_are_not_called_network_errors():
+    assert ms._short_reason(OSError(28, "No space left on device")) == "disk full"
+    assert "locked" in ms._short_reason(PermissionError(13, "denied", "x.part"))
+    assert ms._short_reason(ConnectionResetError(10054, "reset")) == "no internet connection"

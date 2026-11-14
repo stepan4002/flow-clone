@@ -56,6 +56,23 @@ def _command_target(command: str) -> str:
     return command.split(" ", 1)[0]
 
 
+def _command_files(command: str) -> list[str]:
+    """Files a Run-key command needs: the program and, for python(w).exe, its script."""
+    import os
+    import shlex
+    command = os.path.expandvars(command.strip())
+    if os.path.exists(command.strip('"')):  # a bare (possibly unquoted) program path
+        return [command.strip('"')]
+    try:
+        parts = [p.strip('"') for p in shlex.split(command, posix=False)]
+    except ValueError:
+        parts = [_command_target(command)]
+    files = parts[:1]
+    if files and os.path.basename(files[0]).lower().startswith("python") and len(parts) > 1:
+        files.append(parts[1])
+    return files
+
+
 def ensure_autostart_current() -> None:
     """Repair a Run value left pointing at a FlowClone that no longer exists (e.g. after
     moving from the script install to FlowClone.exe). Another existing install is left alone."""
@@ -63,7 +80,8 @@ def ensure_autostart_current() -> None:
     value = _autostart_value()
     if value is None or value.strip().lower() == paths.launch_command().lower():
         return
-    if os.path.exists(_command_target(value)):
+    files = _command_files(value)
+    if files and all(os.path.exists(f) for f in files):
         log.info("autostart points to another FlowClone install (%s); leaving it", value)
         return
     try:
@@ -342,7 +360,8 @@ class HubWindow:
         self._inject = tk.StringVar(value=c["injection"]["mode"])
         ttk.Combobox(row, textvariable=self._inject, state="readonly", width=8,
                      values=["paste", "type"]).pack(side="left", padx=6)
-        self._autostart = tk.BooleanVar(value=is_autostart_enabled())
+        self._autostart_was = is_autostart_enabled()
+        self._autostart = tk.BooleanVar(value=self._autostart_was)
         ttk.Checkbutton(gen, text="Start FlowClone when Windows starts",
                         variable=self._autostart).pack(anchor="w", pady=1)
 
@@ -380,10 +399,14 @@ class HubWindow:
 
         cfg.save_config(c)
         self.app.apply_live_settings()
-        try:
-            set_autostart(self._autostart.get())
-        except OSError as e:
-            messagebox.showwarning("Autostart", f"Could not update autostart: {e}")
+        # Only when the box was changed: an unchanged, unticked box must not delete the
+        # autostart entry of another FlowClone install (script vs exe).
+        if self._autostart.get() != self._autostart_was:
+            try:
+                set_autostart(self._autostart.get())
+                self._autostart_was = self._autostart.get()
+            except OSError as e:
+                messagebox.showwarning("Autostart", f"Could not update autostart: {e}")
 
         msg = "Saved."
         if restart_needed:

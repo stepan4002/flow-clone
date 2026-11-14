@@ -45,8 +45,9 @@ Name: "autostart"; Description: "Start FlowClone when I sign in to Windows"; Fla
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [InstallDelete]
-; No stale PyInstaller files across upgrades.
-Type: filesandordirs; Name: "{app}\_internal"
+; No stale PyInstaller files across upgrades - only in a folder that holds FlowClone.exe,
+; never another app's _internal in a hand-picked folder.
+Type: filesandordirs; Name: "{app}\_internal"; Check: IsFlowCloneFolder
 
 [Files]
 Source: "..\dist\FlowClone\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -73,6 +74,30 @@ const
 
 var
   OldScriptInstall: Boolean;
+
+function IsFlowCloneFolder(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\FlowClone.exe'));
+end;
+
+{ The script install (install.ps1) uses the same Start-menu file. When the exe is
+  uninstalled while the script install remains, give the shortcut back to it. }
+procedure RestoreScriptShortcut();
+var
+  Base, Pythonw, RunPy, Lnk: String;
+begin
+  Base := ExpandConstant('{localappdata}\FlowClone');
+  Pythonw := Base + '\venv\Scripts\pythonw.exe';
+  RunPy := Base + '\app\run.py';
+  Lnk := ExpandConstant('{userprograms}\FlowClone.lnk');
+  if FileExists(Pythonw) and FileExists(RunPy) and not FileExists(Lnk) then
+    try
+      CreateShellLink(Lnk, 'FlowClone - local voice dictation', Pythonw,
+                      '"' + RunPy + '"', Base + '\app', '', 0, SW_SHOWNORMAL);
+    except
+      Log('Could not restore the script-install shortcut: ' + GetExceptionMessage);
+    end;
+end;
 
 { Close a running FlowClone.exe and wait until it has released its files. }
 procedure CloseRunningApp(Silent: Boolean);
@@ -126,6 +151,7 @@ begin
   if RegQueryStringValue(HKEY_CURRENT_USER, RunKey, 'FlowClone', Data) then
     if Pos(Lowercase(ExpandConstant('{app}\FlowClone.exe')), Lowercase(Data)) > 0 then
       RegDeleteValue(HKEY_CURRENT_USER, RunKey, 'FlowClone');
+  RestoreScriptShortcut();
   if UninstallSilent then
     exit;
   if MsgBox('Also remove your FlowClone settings, history, dictionary and the downloaded' + #13#10 +

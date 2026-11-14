@@ -30,11 +30,26 @@ function Install-FlowClone {
     $AppDir = Join-Path $Dir 'app'
     $VenvDir = Join-Path $Dir 'venv'
     $Shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'FlowClone.lnk'
-    $ExeInstalled = Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\FlowClone\FlowClone.exe')
+    # The app keeps its speech model here, wherever the app itself is installed.
+    $ModelsDir = Join-Path $env:LOCALAPPDATA 'FlowClone\models'
     $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
+    # FlowClone.exe may be installed in a custom folder: ask its uninstall entry.
+    $ExeInstalled = Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\FlowClone\FlowClone.exe')
+    $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{8456CF1F-F3F1-4BE1-AE81-0513E6010D46}_is1'
+    $exeDir = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue).InstallLocation
+    if ($exeDir -and (Test-Path -LiteralPath (Join-Path $exeDir 'FlowClone.exe'))) { $ExeInstalled = $true }
+
+    # Plain string tests: -like would read [ ] in a path as wildcards.
+    function Test-Under($path, $root) {
+        return [bool]($path -and $path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase))
+    }
+    function Test-Mentions($text, $part) {
+        return [bool]($text -and $text.IndexOf($part, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    }
+
     function Get-ShortcutTarget($path) {
-        if (-not (Test-Path $path)) { return $null }
+        if (-not (Test-Path -LiteralPath $path)) { return $null }
         try { return (New-Object -ComObject WScript.Shell).CreateShortcut($path).TargetPath } catch { return $null }
     }
 
@@ -42,7 +57,7 @@ function Install-FlowClone {
 
     function Stop-RunningFlowClone {
         Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -like "*$AppDir*" } |
+            Where-Object { Test-Mentions $_.CommandLine $AppDir } |
             ForEach-Object {
                 Write-Step "Stopping the running FlowClone (PID $($_.ProcessId))"
                 Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
@@ -54,17 +69,21 @@ function Install-FlowClone {
         Write-Step "Removing the script install in $Dir"
         foreach ($sub in 'app', 'venv') {
             $p = Join-Path $Dir $sub
-            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
         }
         # The speech model is shared with FlowClone.exe: keep it while the exe is installed.
-        $models = Join-Path $Dir 'models'
-        if ((Test-Path $models) -and -not $ExeInstalled) { Remove-Item $models -Recurse -Force }
-        if ((Test-Path $Dir) -and -not (Get-ChildItem $Dir -Force)) { Remove-Item $Dir -Force }
+        if ((Test-Path -LiteralPath $ModelsDir) -and -not $ExeInstalled) {
+            Remove-Item -LiteralPath $ModelsDir -Recurse -Force
+        }
+        foreach ($d in @($Dir, (Split-Path $ModelsDir))) {
+            if ((Test-Path -LiteralPath $d) -and -not (Get-ChildItem -LiteralPath $d -Force)) {
+                Remove-Item -LiteralPath $d -Force
+            }
+        }
         # Shortcut and autostart only if they belong to this script install.
-        $target = Get-ShortcutTarget $Shortcut
-        if ($target -and $target -like "$Dir*") { Remove-Item $Shortcut -Force }
+        if (Test-Under (Get-ShortcutTarget $Shortcut) $Dir) { Remove-Item -LiteralPath $Shortcut -Force }
         $run = (Get-ItemProperty -Path $RunKey -Name 'FlowClone' -ErrorAction SilentlyContinue).FlowClone
-        if ($run -and $run -like "*$Dir*") { Remove-ItemProperty -Path $RunKey -Name 'FlowClone' -ErrorAction SilentlyContinue }
+        if (Test-Mentions $run $Dir) { Remove-ItemProperty -Path $RunKey -Name 'FlowClone' -ErrorAction SilentlyContinue }
         Write-Host "FlowClone was uninstalled. Settings and history remain in $env:APPDATA\FlowClone." -ForegroundColor Green
         if ($ExeInstalled) { Write-Host 'FlowClone.exe is still installed (remove it in Settings > Apps).' }
         return
@@ -130,7 +149,7 @@ function Install-FlowClone {
             $winSrc = Join-Path $root.FullName 'windows'
         }
         if (-not (Test-Path (Join-Path $winSrc 'run.py'))) { throw "Could not find windows\run.py in the source ($winSrc)." }
-        if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force }
+        if (Test-Path -LiteralPath $AppDir) { Remove-Item -LiteralPath $AppDir -Recurse -Force }
         # Skip build output (a local checkout may contain a 150+ MB dist folder) and tests.
         & robocopy $winSrc $AppDir /E /XD build dist Output __pycache__ tests /XF *.spec /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "Copying the app files failed (robocopy exit code $LASTEXITCODE)." }
