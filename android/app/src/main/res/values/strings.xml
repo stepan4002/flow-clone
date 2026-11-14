@@ -14,6 +14,14 @@
     <string name="status_listening">Listening…</string>
     <string name="status_listening_tap">Listening… (tap mic to finish)</string>
     <string name="status_transcribing">Transcribing…</string>
+    <string name="status_polishing">✨ Polishing… tap the mic to skip</string>
+    <string name="status_voice_edit">✨ Say what to change…</string>
+    <string name="status_voice_write">✨ Say what to write…</string>
+    <string name="status_voice_edit_needs_ai">Voice edit needs AI — open FlowKey → Settings → AI</string>
+    <string name="status_voice_edit_whisper">Voice edit uses the Whisper engine — turn off streaming</string>
+    <string name="status_voice_edit_private">Not available in password or private fields</string>
+    <string name="status_ai_no_answer">AI didn\'t answer — nothing changed</string>
+    <string name="status_selection_changed">The text changed — nothing replaced</string>
     <string name="status_no_speech">Didn\'t hear anything</string>
     <string name="status_audio_error">Microphone unavailable</string>
     <string name="status_streaming_en_only">Streaming mode is English-only</string>
