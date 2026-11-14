@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLineEdit, QSpin
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from ... import autostart, credstore, paths
-from ...llm import DEFAULT_MODELS, Polisher
+from ...llm import DEFAULT_MODELS, PROVIDERS, Polisher, is_cloud, key_slot
 from ..widgets import (Card, Segmented, Toggle, button, keycaps, label, page, separator,
                        setting_row)
 
@@ -52,6 +52,7 @@ class HotkeyDialog(QDialog):
         self.shown = label("Waiting for keys…", "h2")
         lay.addWidget(self.shown)
         self.result: list[str] | None = None
+        self._closed = False
         self._sig = _Sig()
         self._sig.hotkey.connect(self._got)
         app.suspend_hotkeys()
@@ -66,6 +67,8 @@ class HotkeyDialog(QDialog):
         self._sig.hotkey.emit(combo)
 
     def _got(self, combo):
+        if self._closed:  # the dialog was closed; this is a late result of its key reader
+            return
         keys = [k.strip().lower().replace("left ", "").replace("right ", "")
                 for k in combo.split("+") if k.strip()]
         keys = ["windows" if k in ("win", "left windows", "right windows") else k for k in keys]
@@ -82,7 +85,9 @@ class HotkeyDialog(QDialog):
         self.accept()
 
     def done(self, r):  # noqa: D401 - Qt override
-        self.app.resume_hotkeys()
+        if not self._closed:
+            self._closed = True
+            self.app.resume_hotkeys()
         super().done(r)
 
 
@@ -143,7 +148,7 @@ class SettingsPage:
                                         "Double-tap the hotkey to keep recording without holding.",
                                         ("double_tap_hands_free",)))
         self.hf = QSpinBox()
-        self.hf.setRange(1, 120)
+        self.hf.setRange(1, 20)  # the whole recording is transcribed in one go
         self.hf.setSuffix(" min")
         self.hf.setValue(int(c.get("hands_free_max_minutes", 20)))
         self.hf.valueChanged.connect(lambda v: app.save_settings(
@@ -187,9 +192,10 @@ class SettingsPage:
         ab = QVBoxLayout(self.ai_box)
         ab.setContentsMargins(0, 0, 0, 0)
         ab.setSpacing(8)
-        self.provider = Segmented([("ollama", "Ollama (on this PC)"), ("openai", "OpenAI-compatible"),
-                                   ("anthropic", "Anthropic")], c["llm"].get("provider", "ollama"),
-                                  "AI provider")
+        current = c["llm"].get("provider", "ollama")
+        self.provider = Segmented([("ollama", "Ollama"), ("openai", "OpenAI-compatible"),
+                                   ("anthropic", "Anthropic")],
+                                  current if current in PROVIDERS else "ollama", "AI provider")
         self.provider.changed.connect(self._provider_changed)
         ab.addWidget(self.provider, 0, Qt.AlignLeft)
         self.prov_stack = QStackedWidget()
@@ -289,26 +295,57 @@ class SettingsPage:
         lay.addWidget(setting_row("Ollama address", "Install Ollama, then run: "
                                   "ollama pull qwen3:1.7b",
                                   self._line(c.get("url", ""), "http://localhost:11434",
-                                             self._llm_set("url"), name="Ollama address")))
+                                             self._set_ollama_url, name="Ollama address")))
         lay.addWidget(setting_row("Model", "", self._line(c.get("model", ""), DEFAULT_MODELS["ollama"],
                                                           self._llm_set("model"), name="Ollama model")))
         return w
 
     def _key_field(self, provider):
-        has = credstore.has_key(provider)
-        e = self._line("", "Saved — paste a new key to replace" if has else "Paste your API key",
-                       lambda v: self._save_key(provider, v), password=True,
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        e = self._line("", "", lambda v: self._save_key(provider, v), password=True,
                        name=f"{provider} API key")
-        return e
+        rm = button("Remove", "ghost", "trash", self.app.theme, tooltip="Remove the saved key")
+        rm.clicked.connect(lambda: self._remove_key(provider))
+        row.addWidget(e, 1)
+        row.addWidget(rm)
+        self._key_widgets = getattr(self, "_key_widgets", {})
+        self._key_widgets[provider] = (e, rm)
+        self._update_key_field(provider)
+        return w
+
+    def _slot(self, provider):
+        return key_slot(provider, self.app.config["llm"])
+
+    def _update_key_field(self, provider):
+        e, rm = self._key_widgets[provider]
+        has = credstore.has_key(self._slot(provider))
+        e.clear()
+        e.setPlaceholderText("Saved — paste a new key to replace" if has else "Paste your API key")
+        rm.setVisible(has)
 
     def _save_key(self, provider, value):
-        if value:
-            try:
-                credstore.set_key(provider, value)
-                self.test_out.setText("Key saved in Windows Credential Manager.")
-            except Exception as e:
-                self.test_out.setText(f"Could not save the key: {e}")
+        if not value:
+            return  # an empty field means "keep the saved key"; Remove deletes it
+        try:
+            credstore.set_key(self._slot(provider), value)
+            self.test_out.setText("Key saved in Windows Credential Manager.")
+        except Exception as e:
+            self.test_out.setText(f"Could not save the key ({type(e).__name__}).")
+        self._update_key_field(provider)
         self.app.rebuild_polisher()
+
+    def _remove_key(self, provider):
+        credstore.delete_key(self._slot(provider))
+        self.test_out.setText("Key removed.")
+        self._update_key_field(provider)
+        self.app.rebuild_polisher()
+
+    def _set_api_base(self, v):
+        self.app.save_settings(lambda cc: cc["llm"].__setitem__("api_base", v))
+        self._update_key_field("openai")  # each address has its own saved key
+        self._update_privacy()
 
     def _openai_panel(self):
         w = QWidget()
@@ -318,7 +355,7 @@ class SettingsPage:
         lay.addWidget(setting_row("API address", "Leave empty for OpenAI. Works with Groq, "
                                   "OpenRouter, LM Studio and others.",
                                   self._line(c.get("api_base", ""), "https://api.openai.com/v1",
-                                             self._llm_set("api_base"), name="API address")))
+                                             self._set_api_base, name="API address")))
         lay.addWidget(setting_row("Model", "", self._line(c.get("api_model", ""),
                                                           DEFAULT_MODELS["openai"],
                                                           self._llm_set("api_model"),
@@ -332,26 +369,41 @@ class SettingsPage:
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         c = self.app.config["llm"]
-        lay.addWidget(setting_row("Model", "", self._line(c.get("api_model", ""),
+        lay.addWidget(setting_row("Model", "", self._line(c.get("anthropic_model", ""),
                                                           DEFAULT_MODELS["anthropic"],
-                                                          self._llm_set("api_model"),
-                                                          name="Model")))
+                                                          self._llm_set("anthropic_model"),
+                                                          name="Anthropic model")))
         lay.addWidget(setting_row("API key", "", self._key_field("anthropic")))
         return w
 
+    def _set_ollama_url(self, v):
+        self.app.save_settings(lambda cc: cc["llm"].__setitem__("url", v))
+        self._update_privacy()
+
     def _provider_changed(self, p, save=True):
-        self.prov_stack.setCurrentIndex(["ollama", "openai", "anthropic"].index(p))
-        if p == "ollama":
+        p = p if p in PROVIDERS else "ollama"
+        self.prov_stack.setCurrentIndex(list(PROVIDERS).index(p))
+        self.test_out.setText("")
+        if save:
+            self.app.save_settings(lambda cc: cc["llm"].__setitem__("provider", p))
+        self._update_privacy()
+
+    def _update_privacy(self):
+        cfg = dict(self.app.config["llm"])
+        cfg["provider"] = self.provider.value() or "ollama"
+        if not is_cloud(cfg):
             self.privacy.setText("Runs on this computer — nothing leaves it.")
+        elif cfg["provider"] == "ollama":
+            self.privacy.setText("Privacy: this Ollama runs on another computer — the text of "
+                                 "each dictation (and the selected text in Command Mode) is sent "
+                                 "to it over your network, unencrypted with http://. Your audio "
+                                 "is never sent.")
         else:
             self.privacy.setText("Privacy: with this provider the text of each dictation (and "
                                  "the selected text in Command Mode) is sent over the internet "
                                  "to the provider you chose, using your own key. Your audio is "
                                  "never sent. A server on this PC (LM Studio, llama.cpp) keeps "
                                  "everything local.")
-        self.test_out.setText("")
-        if save:
-            self.app.save_settings(lambda cc: cc["llm"].__setitem__("provider", p))
 
     def _ai_visible(self):
         self.ai_box.setVisible(self.ai_on.isChecked())
@@ -377,7 +429,10 @@ class SettingsPage:
         try:
             autostart.set_autostart(on)
         except OSError as e:
-            self.test_out.setText(f"Could not change autostart: {e}")
+            self.autostart.blockSignals(True)
+            self.autostart.setChecked(not on)
+            self.autostart.blockSignals(False)
+            self.app.flash(f"Couldn't change \"launch at sign-in\" ({type(e).__name__})", 3000)
 
     def _render_keys(self):
         while self.keys_box.count():
@@ -419,6 +474,9 @@ class SettingsPage:
         i = self.mic.findData(current)
         self.mic.setCurrentIndex(i if i >= 0 else 0)
         self._filling = False
+        if i < 0 and current is not None:
+            # The saved microphone is gone (unplugged / renumbered): use the system default.
+            self.app.save_settings(lambda cc: cc["audio"].__setitem__("device", None))
         self.autostart.blockSignals(True)
         self.autostart.setChecked(autostart.is_autostart_enabled())
         self.autostart.blockSignals(False)

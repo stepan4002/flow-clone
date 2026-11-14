@@ -64,6 +64,17 @@ class FlowLayout(QLayout):
         return y + line - rect.y()
 
 
+_NL = "\u23ce"  # ⏎ — how a line break is shown (and typed) in the one-line table cells
+
+
+def _show(v: str) -> str:
+    return v.replace("\r\n", "\n").replace("\n", _NL)
+
+
+def _parse(v: str) -> str:
+    return v.replace(_NL, "\n")
+
+
 class PairTable(QWidget):
     """Two editable columns with add / remove; calls on_change(dict) after every edit."""
 
@@ -114,7 +125,7 @@ class PairTable(QWidget):
         self.table.blockSignals(True)
         self.table.insertRow(r)
         self.table.setItem(r, 0, QTableWidgetItem(k))
-        self.table.setItem(r, 1, QTableWidgetItem(v.replace("\n", "\\n")))
+        self.table.setItem(r, 1, QTableWidgetItem(_show(v)))
         self.table.blockSignals(False)
 
     def _add(self):
@@ -137,8 +148,19 @@ class PairTable(QWidget):
         for r in range(self.table.rowCount()):
             a, b = self.table.item(r, 0), self.table.item(r, 1)
             if a and b and a.text().strip():
-                out[a.text().strip()] = b.text().replace("\\n", "\n")
+                out[a.text().strip()] = _parse(b.text())
         return out
+
+    def set_data(self, data: dict):
+        """Show `data` (e.g. after the file was changed outside this page)."""
+        if data == self.data():
+            return
+        self.table.blockSignals(True)
+        self.table.setRowCount(0)
+        self.table.blockSignals(False)
+        for k, v in data.items():
+            self._append(k, v)
+        self._update_empty()
 
     def _emit(self):
         self._update_empty()
@@ -191,7 +213,7 @@ class DictionaryPage:
         self.stack.addWidget(corr)
 
         repl = Card("Replacements", "Say something short, insert something long — "
-                                    "e.g. \"my zoom link\" → https://…  Use \\n for a new line.")
+                                    "e.g. \"my zoom link\" → https://…  Type ⏎ for a new line.")
         self.repl = PairTable("You say", "Inserted text", lex.replacements, lambda _: self._save(),
                               theme, ("You say", "Inserted text"))
         repl.body.addWidget(self.repl)
@@ -231,10 +253,14 @@ class DictionaryPage:
         self.app.lexicon.save_dictionary(self._words, self.corr.data(), self.repl.data())
 
     def refresh(self):
+        # Always show what is on disk now (hand edits, or changes picked up by a dictation).
         lex = self.app.lexicon
-        if lex.reload_if_changed():
+        lex.reload_if_changed()
+        if self._words != lex.words:
             self._words = list(lex.words)
             self._render_chips()
+        self.corr.set_data(lex.corrections)
+        self.repl.set_data(lex.replacements)
 
 
 class SnippetsPage:
@@ -259,3 +285,4 @@ class SnippetsPage:
 
     def refresh(self):
         self.app.lexicon.reload_if_changed()
+        self.table.set_data(self.app.lexicon.snippets)

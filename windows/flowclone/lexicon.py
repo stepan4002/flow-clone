@@ -40,6 +40,14 @@ def _load(path, default):
         return dict(default)
 
 
+def _str_map(v) -> dict:
+    """Only text -> text pairs (hand edits with other types are skipped, not fatal)."""
+    if not isinstance(v, dict):
+        return {}
+    return {k: val for k, val in v.items()
+            if isinstance(k, str) and k.strip() and isinstance(val, str)}
+
+
 def _mtime(path) -> float:
     try:
         return path.stat().st_mtime
@@ -53,10 +61,15 @@ class Lexicon:
 
     def reload(self):
         d = _load(DICTIONARY_PATH, _DEFAULT_DICTIONARY)
-        self.words: list[str] = list(d.get("words", []))
-        self.corrections: dict = dict(d.get("corrections", {}))
-        self.replacements: dict = dict(d.get("replacements", {}))
-        self.snippets: dict = dict(_load(SNIPPETS_PATH, _DEFAULT_SNIPPETS))
+        if not isinstance(d, dict):
+            log.warning("dictionary.json is not an object — ignoring it")
+            d = {}
+        words = d.get("words", [])
+        self.words: list[str] = [w for w in words if isinstance(w, str) and w.strip()] \
+            if isinstance(words, list) else []
+        self.corrections: dict = _str_map(d.get("corrections"))
+        self.replacements: dict = _str_map(d.get("replacements"))
+        self.snippets: dict = _str_map(_load(SNIPPETS_PATH, _DEFAULT_SNIPPETS))
         self._stamp = (_mtime(DICTIONARY_PATH), _mtime(SNIPPETS_PATH))
 
     def reload_if_changed(self) -> bool:
@@ -68,16 +81,17 @@ class Lexicon:
         return False
 
     def save_dictionary(self, words: list[str], corrections: dict, replacements: dict):
+        from .config import atomic_write
         DICTIONARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DICTIONARY_PATH.write_text(json.dumps(
+        atomic_write(DICTIONARY_PATH, json.dumps(
             {"words": words, "corrections": corrections, "replacements": replacements},
-            indent=2, ensure_ascii=False), encoding="utf-8")
+            indent=2, ensure_ascii=False))
         self.reload()
 
     def save_snippets(self, snippets: dict):
+        from .config import atomic_write
         SNIPPETS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SNIPPETS_PATH.write_text(json.dumps(snippets, indent=2, ensure_ascii=False),
-                                 encoding="utf-8")
+        atomic_write(SNIPPETS_PATH, json.dumps(snippets, indent=2, ensure_ascii=False))
         self.reload()
 
     @staticmethod

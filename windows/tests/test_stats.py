@@ -37,3 +37,12 @@ def test_legacy_file_has_no_speed(tmp_path):
     s.add("hello", seconds=0)
     assert s.wpm() is None and s.time_saved_minutes() == 0
     assert s.snapshot()["total_words"] == 5001
+
+
+def test_bad_types_in_stats_file_are_ignored(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text('{"days": [], "apps": null, "best_streak": "3", "total_words": 10}',
+                 encoding="utf-8")
+    s = Stats(path=p)
+    s.add("hello world", seconds=2, app="x.exe")
+    assert s.snapshot()["total_words"] == 12 and s.streak()[0] == 1

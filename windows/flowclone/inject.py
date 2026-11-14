@@ -61,11 +61,36 @@ def _clipboard_seq() -> int:
     return ctypes.windll.user32.GetClipboardSequenceNumber()
 
 
-def read_selection(timeout_s: float = 0.35) -> str | None:
+# Terminals: Ctrl+C with nothing selected interrupts the running program. Never send it there.
+TERMINALS = {"windowsterminal.exe", "wt.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
+             "conhost.exe", "openconsole.exe", "mintty.exe", "alacritty.exe", "wezterm-gui.exe",
+             "putty.exe", "kitty.exe", "tabby.exe", "hyper.exe", "warp.exe"}
+# Editors that copy the whole current line when nothing is selected.
+LINE_COPY_EDITORS = {"code.exe", "code - insiders.exe", "cursor.exe", "windsurf.exe",
+                     "vscodium.exe", "devenv.exe", "sublime_text.exe", "notepad++.exe",
+                     "idea64.exe", "pycharm64.exe", "webstorm64.exe", "rider64.exe",
+                     "clion64.exe", "goland64.exe", "phpstorm64.exe", "rubymine64.exe",
+                     "datagrip64.exe", "studio64.exe", "fleet.exe", "zed.exe"}
+
+
+def can_read_selection(app: str) -> bool:
+    """False where Ctrl+C is not a harmless copy (terminals)."""
+    return (app or "").lower() not in TERMINALS
+
+
+def _looks_like_line_copy(text: str) -> bool:
+    """An editor's 'copy line' result: exactly one line plus its line break."""
+    body = text.rstrip("\r\n")
+    return text != body and "\n" not in body
+
+
+def read_selection(app: str = "", timeout_s: float = 0.35) -> str | None:
     """The text selected in the focused app, or None when nothing is selected.
 
     Sends Ctrl+C and watches the clipboard sequence number (not its content: the selection may
     equal what was already on the clipboard). The user's clipboard is restored immediately.
+    In editors that copy the current line when nothing is selected, a single whole line with its
+    line break counts as "nothing selected" (so that line is not edited or sent anywhere).
     """
     try:
         old = pyperclip.paste()
@@ -92,7 +117,55 @@ def read_selection(timeout_s: float = 0.35) -> str | None:
             pyperclip.copy(old)
         except pyperclip.PyperclipException:
             pass
-    return selection if selection and selection.strip() else None
+    if not selection or not selection.strip():
+        return None
+    if (app or "").lower() in LINE_COPY_EDITORS and _looks_like_line_copy(selection):
+        return None
+    return selection
+
+
+_MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B, 0x5C)  # Shift, Ctrl, Alt, left/right Win
+
+
+def modifier_down(vk: int) -> bool:
+    """Physical key state from Windows (also right after focus moved to an admin window)."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+
+
+def wait_modifiers_released(timeout_s: float = 1.0):
+    """Wait until Shift/Ctrl/Alt/Win are up (so a paste isn't Ctrl+Shift+Alt+V)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline and any(modifier_down(vk) for vk in _MODIFIER_VKS):
+        time.sleep(0.02)
+
+
+def find_app_window(exe: str) -> int:
+    """A visible top-level window of a running app (e.g. 'slack.exe'), or 0."""
+    if sys.platform != "win32" or not exe:
+        return 0
+    try:
+        import psutil
+        import win32gui
+        import win32process
+        found = []
+
+        def cb(hwnd, _):
+            if found or not win32gui.IsWindowVisible(hwnd) or not win32gui.GetWindowText(hwnd):
+                return True
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if psutil.Process(pid).name().lower() == exe.lower():
+                    found.append(hwnd)
+            except Exception:
+                pass
+            return True
+        win32gui.EnumWindows(cb, None)
+        return found[0] if found else 0
+    except Exception:
+        return 0
 
 
 def foreground_window() -> int:

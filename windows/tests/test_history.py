@@ -56,3 +56,20 @@ def test_concurrent_append_and_read(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert not errors and len(h.entries()) == 100
+
+
+def test_hand_edited_lines_are_repaired(tmp_path):
+    p = tmp_path / "h.jsonl"
+    p.write_text('{"text": null}\n{"app": 5, "text": "ok"}\n', encoding="utf-8")
+    e = History(path=p).entries()
+    assert [x["text"] for x in e] == ["ok", ""] and all(x["ts"] == "" for x in e)
+
+
+def test_identical_legacy_lines_get_distinct_ids(tmp_path):
+    p = tmp_path / "h.jsonl"
+    line = json.dumps({"ts": "2026-01-01 10:00:00", "app": "a", "raw": "ok", "text": "ok"})
+    p.write_text(line + "\n" + line + "\n", encoding="utf-8")
+    h = History(path=p)
+    ids = [x["id"] for x in h.entries()]
+    assert len(set(ids)) == 2
+    assert h.delete(ids[0]) and len(h.entries()) == 1

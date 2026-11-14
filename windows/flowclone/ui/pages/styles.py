@@ -106,8 +106,10 @@ class _CategoryCard(Card):
             for k, cat in c["styles"]["categories"].items():  # an app is in one category only
                 cat["apps"] = [a for a in cat.get("apps", []) if a.lower() != exe]
             c["styles"]["categories"][self.key]["apps"].append(exe)
-            if self.key == "messaging" and exe not in c["casual_apps"]:
-                c["casual_apps"].append(exe)       # the script install reads this list
+            casual = [a for a in c["casual_apps"] if a.lower() != exe]
+            if self.key == "messaging":
+                casual.append(exe)                 # the script install reads this list
+            c["casual_apps"] = casual
         self.page.app.save_settings(mut)
         self.page.render_all()
 
@@ -116,7 +118,7 @@ class _CategoryCard(Card):
             cat = c["styles"]["categories"][self.key]
             cat["apps"] = [a for a in cat.get("apps", []) if a != exe]
             if self.key == "messaging":
-                c["casual_apps"] = [a for a in c["casual_apps"] if a != exe]
+                c["casual_apps"] = [a for a in c["casual_apps"] if a.lower() != exe.lower()]
         self.page.app.save_settings(mut)
         self.render()
 

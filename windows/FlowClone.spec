@@ -79,7 +79,7 @@ _DROP = ("opengl32sw.dll", "d3dcompiler_47.dll", "qt6pdf", "qt6qml", "qt6quick",
          "qtquick", "qmltooling")
 a.binaries = [b for b in a.binaries if not any(d in b[0].lower() for d in _DROP)]
 a.datas = [d for d in a.datas
-           if not d[0].replace("/", "\\").lower().startswith(("pyside6\translations", "pyside6\qml"))]
+           if not d[0].replace(chr(92), "/").lower().startswith(("pyside6/translations/", "pyside6/qml/"))]
 pyz = PYZ(a.pure)  # noqa: F821
 
 exe = EXE(  # noqa: F821

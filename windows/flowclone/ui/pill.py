@@ -120,8 +120,15 @@ class Pill(QWidget):
             self._fade.setStartValue(self.windowOpacity())
             self._fade.setEndValue(1.0)
             self._fade.start()
-        if not self._tick.isActive():
+        self._sync_timer()
+
+    def _sync_timer(self):
+        # Only states that move need the 30 fps timer; static ones are painted once.
+        moving = self._state in ("recording", "hands_free", "command", "processing", "loading")
+        if moving and not self._tick.isActive():
             self._tick.start()
+        elif not moving and self._tick.isActive():
+            self._tick.stop()
 
     def _hide(self):
         if self.isVisible() and not self._hiding:

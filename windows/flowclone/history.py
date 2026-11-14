@@ -19,14 +19,21 @@ def _legacy_id(entry: dict) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
+def _str(v) -> str:
+    return v if isinstance(v, str) else ""
+
+
 def _normalise(entry: dict) -> dict:
-    entry.setdefault("id", _legacy_id(entry))
-    entry.setdefault("app", "")
-    entry.setdefault("raw", "")
-    entry.setdefault("text", "")
-    entry.setdefault("duration_s", 0.0)
-    entry.setdefault("style", None)
-    if "words" not in entry:
+    """Fill in what older versions didn't write and repair hand-edited values."""
+    for key in ("ts", "app", "raw", "text"):
+        entry[key] = _str(entry.get(key))
+    if not isinstance(entry.get("id"), str) or not entry["id"]:
+        entry["id"] = _legacy_id(entry)
+    if not isinstance(entry.get("duration_s"), (int, float)):
+        entry["duration_s"] = 0.0
+    if not isinstance(entry.get("style"), (str, type(None))):
+        entry["style"] = None
+    if not isinstance(entry.get("words"), int):
         from .stats import count_words
         entry["words"] = count_words(entry["text"])
     return entry
@@ -54,11 +61,13 @@ class History:
         return entry
 
     def _trim(self):
+        from .config import atomic_write
         try:
+            limit = int(self.limit) if self.limit else 1000
             lines = self.path.read_text(encoding="utf-8").splitlines()
-            if len(lines) > self.limit * 2:
-                self.path.write_text("\n".join(lines[-self.limit:]) + "\n", encoding="utf-8")
-        except OSError:
+            if len(lines) > limit * 2:
+                atomic_write(self.path, "\n".join(lines[-limit:]) + "\n")
+        except (OSError, ValueError, TypeError):
             pass
 
     def delete(self, entry_id: str) -> bool:
@@ -67,12 +76,11 @@ class History:
             kept = [e for e in entries if e["id"] != entry_id]
             if len(kept) == len(entries):
                 return False
-            self._write_all(kept)
-            return True
+            return self._write_all(kept)
 
-    def clear(self):
+    def clear(self) -> bool:
         with self._lock:
-            self._write_all([])
+            return self._write_all([])
 
     # ---------- reading ----------
 
@@ -82,7 +90,7 @@ class History:
             lines = self.path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
-        out = []
+        out, seen = [], set()
         for line in lines:
             line = line.strip()
             if not line:
@@ -92,14 +100,25 @@ class History:
             except json.JSONDecodeError:
                 continue
             if isinstance(entry, dict):
-                out.append(_normalise(entry))
+                entry = _normalise(entry)
+                base, n = entry["id"], 1
+                while entry["id"] in seen:  # identical old lines: give each its own id
+                    entry["id"] = f"{base}-{n}"
+                    n += 1
+                seen.add(entry["id"])
+                out.append(entry)
         return out
 
-    def _write_all(self, entries: list[dict]):
+    def _write_all(self, entries: list[dict]) -> bool:
+        from .config import atomic_write
         text = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in entries)
-        tmp = self.path.with_suffix(".jsonl.tmp")
-        tmp.write_text(text, encoding="utf-8")
-        tmp.replace(self.path)
+        try:
+            atomic_write(self.path, text)
+            return True
+        except OSError as e:
+            import logging
+            logging.getLogger("flowclone").warning("could not write the history: %s", e)
+            return False
 
     def entries(self, limit: int | None = None) -> list[dict]:
         """Newest first."""

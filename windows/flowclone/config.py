@@ -46,7 +46,8 @@ DEFAULTS = {
         "tone_matching": True,                 # rewrite in the style of the app's category
         "provider": "ollama",                  # "ollama" | "openai" (any OpenAI-compatible API) | "anthropic"
         "api_base": "",                        # OpenAI-compatible base URL ("" = api.openai.com/v1)
-        "api_model": "",                       # model for the openai / anthropic providers
+        "api_model": "",                       # model for the openai provider
+        "anthropic_model": "",                 # model for the anthropic provider
     },
     # Per-app writing styles: verbatim | clean | casual | formal (AI rewrite only if llm.enabled).
     "styles": {
@@ -106,10 +107,25 @@ def defaults() -> dict:
     return d
 
 
+def _drop_bad_sections(base: dict, user: dict) -> dict:
+    """Ignore hand-edited values whose type doesn't match a section of the defaults (e.g.
+    "overlay": null): one bad entry must not stop FlowClone from starting."""
+    out = {}
+    for k, v in user.items():
+        if isinstance(base.get(k), dict):
+            if not isinstance(v, dict):
+                log.warning("config: ignoring %r (expected a section)", k)
+                continue
+            v = _drop_bad_sections(base[k], v)
+        out[k] = v
+    return out
+
+
 def migrate(user: dict) -> dict:
     """Merge a config written by any earlier version over the defaults."""
     if not isinstance(user, dict):
         user = {}
+    user = _drop_bad_sections(DEFAULTS, user)
     merged = _merge(defaults(), user)
     ui = user.get("ui") if isinstance(user.get("ui"), dict) else {}
     if "onboarding_done" not in ui:
@@ -121,6 +137,19 @@ def migrate(user: dict) -> dict:
 
 
 def save_config(config: dict):
+    """Atomic write: a crash mid-save never leaves a truncated config.json."""
     APP_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False),
-                           encoding="utf-8")
+    atomic_write(CONFIG_PATH, json.dumps(config, indent=2, ensure_ascii=False))
+
+
+def atomic_write(path: Path, text: str):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise

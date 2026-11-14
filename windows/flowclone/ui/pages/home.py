@@ -2,7 +2,8 @@
 from datetime import datetime
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QApplication, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout,
+                               QWidget)
 
 __all__ = ["HomePage", "pretty_app"]
 
@@ -74,6 +75,10 @@ class HomePage:
         col.addStretch()
 
     def refresh(self):
+        for lb in self.widget.findChildren(QLabel):
+            if lb.property("role") == "h1":
+                lb.setText(_greeting())
+                break
         s = self.app.stats
         week = s.this_week()
         cur, best = s.streak()

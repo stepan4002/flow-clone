@@ -1,6 +1,6 @@
 """Small reusable widgets for the FlowClone window (styled through ui/theme.py)."""
 from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel,
                                QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -23,6 +23,7 @@ def button(text: str, kind: str | None = None, icon_name: str | None = None, the
     if kind:
         b.setProperty("kind", kind)
     if icon_name and theme is not None:
+        b.setProperty("icon_name", icon_name)
         color = "#FFFFFF" if kind == "primary" else theme.tokens["text"]
         b.setIcon(icons.icon(icon_name, color))
         b.setIconSize(QSize(16, 16))
@@ -191,6 +192,9 @@ class Segmented(QFrame):
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
             b.setAccessibleName(f"{accessible_name}: {text}")
+            bold = QFont(b.font())
+            bold.setBold(True)  # the checked segment is bold: reserve room so it isn't clipped
+            b.setMinimumWidth(QFontMetrics(bold).horizontalAdvance(text) + 30)
             self.group.addButton(b)
             self.buttons[key] = b
             lay.addWidget(b)
@@ -357,9 +361,13 @@ def setting_row(title: str, description: str, control: QWidget) -> QWidget:
     return w
 
 
-def restyle_tree(widget):
-    """Re-polish a widget tree after a theme change."""
+def restyle_tree(widget, theme=None):
+    """Re-polish a widget tree after a theme change (and re-colour button icons)."""
     for child in widget.findChildren(QWidget):
         if hasattr(child, "restyle"):
             child.restyle()
+        name = child.property("icon_name") if isinstance(child, QPushButton) else None
+        if name and theme is not None:
+            color = "#FFFFFF" if child.property("kind") == "primary" else theme.tokens["text"]
+            child.setIcon(icons.icon(name, color))
         polish(child)

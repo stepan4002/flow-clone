@@ -58,3 +58,14 @@ def test_save_and_reload_if_changed(monkeypatch, tmp_path):
     later = time.time() + 5
     os.utime(tmp_path / "snippets.json", (later, later))
     assert lex.reload_if_changed() and lex.snippets == {"sig": "Cheers"}
+
+
+def test_wrong_types_in_files_do_not_break_dictation(monkeypatch, tmp_path):
+    _use_tmp_files(monkeypatch, tmp_path)
+    (tmp_path / "dictionary.json").write_text('{"words": [1, "Kubernetes"], "corrections": null,'
+                                              ' "replacements": {"a": 5, "brb": "be right back"}}',
+                                              encoding="utf-8")
+    (tmp_path / "snippets.json").write_text('["a"]', encoding="utf-8")
+    lex = lexicon.Lexicon()
+    assert lex.words == ["Kubernetes"] and lex.corrections == {} and lex.snippets == {}
+    assert lex.apply("brb kubernetes") == "be right back Kubernetes"

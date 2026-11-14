@@ -33,7 +33,10 @@ def apply_titlebar(widget, dark: bool, caption_hex: str | None = None):
 def force_foreground(widget):
     """Bring a window to the front even when another app has the foreground (Windows only
     lets the foreground process do that; AttachThreadInput is the usual workaround)."""
-    widget.showNormal()
+    if widget.isMaximized():
+        widget.showMaximized()
+    else:
+        widget.showNormal()
     widget.raise_()
     widget.activateWindow()
     if sys.platform != "win32":

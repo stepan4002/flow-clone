@@ -106,12 +106,14 @@ class MainWindow(QMainWindow):
 
     def show_page(self, key: str):
         key = key if key in PAGES else "home"
-        p = self.page(key)
         try:
+            p = self.page(key)
             p.refresh()
         except Exception:
             import logging
-            logging.getLogger("flowclone").exception("page refresh failed: %s", key)
+            logging.getLogger("flowclone").exception("page failed: %s", key)
+            if key not in self.pages:
+                return
         self.stack.setCurrentWidget(p.widget)
         self.nav[key][0].setChecked(True)
         self.current = key
@@ -119,6 +121,9 @@ class MainWindow(QMainWindow):
     def open(self, key: str = "home"):
         if self.current is None or key != "home" or not self.isVisible():
             self.show_page(key if key else "home")
+        if getattr(self, "_start_maximized", False) and not self.isVisible():
+            self._start_maximized = False
+            self.showMaximized()
         force_foreground(self)
         apply_titlebar(self, self.theme.dark, self.theme.tokens["bg"])
 
@@ -140,7 +145,7 @@ class MainWindow(QMainWindow):
         for p in self.pages.values():
             if hasattr(p, "restyle"):
                 p.restyle()
-        restyle_tree(self)
+        restyle_tree(self, self.theme)
         apply_titlebar(self, self.theme.dark, self.theme.tokens["bg"])
 
     def _model_status(self, state, pct):
@@ -160,9 +165,14 @@ class MainWindow(QMainWindow):
     # ---------- geometry ----------
 
     def _restore_geometry(self):
-        g = (self.app.config.get("ui") or {}).get("window")
-        if isinstance(g, list) and len(g) == 4:
-            rect = QRect(*[int(v) for v in g])
+        ui = self.app.config.get("ui") or {}
+        g = ui.get("window")
+        self._start_maximized = bool(ui.get("maximized"))
+        try:
+            rect = QRect(*[int(v) for v in g]) if isinstance(g, list) and len(g) == 4 else None
+        except (TypeError, ValueError):
+            rect = None
+        if rect is not None and rect.width() >= 400 and rect.height() >= 300:
             if any(s.availableGeometry().intersects(rect) for s in QGuiApplication.screens()):
                 self.setGeometry(rect)
                 return
@@ -172,8 +182,12 @@ class MainWindow(QMainWindow):
             self.move(c.x() - self.width() // 2, c.y() - self.height() // 2)
 
     def closeEvent(self, e):  # noqa: N802
-        g = self.geometry()
-        self.app.save_settings(lambda c: c["ui"].__setitem__(
-            "window", [g.x(), g.y(), g.width(), g.height()]), live=False)
+        g = self.normalGeometry() if self.isMaximized() else self.geometry()
+        maximized = self.isMaximized()
+
+        def mut(c):
+            c["ui"]["window"] = [g.x(), g.y(), g.width(), g.height()]
+            c["ui"]["maximized"] = maximized
+        self.app.save_settings(mut, live=False)
         e.ignore()
         self.hide()

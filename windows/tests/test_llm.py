@@ -122,3 +122,45 @@ def test_test_button_messages():
     assert p.test() == (False, "No API key saved for this provider")
     p, _ = make("anthropic", Resp(401))
     assert p.test() == (False, "the API key was rejected")
+
+
+def test_key_slots_per_service_and_no_cloud_key_for_local_servers():
+    from flowclone.llm import key_slot
+    assert key_slot("openai", {}) == "openai"
+    assert key_slot("openai", {"api_base": "https://api.groq.com/openai/v1"}) == "openai@api.groq.com"
+    assert key_slot("anthropic", {"api_base": "https://x"}) == "anthropic"
+    asked = []
+    s = Session(Resp(200, {"choices": [{"message": {"content": "Hi."}}]}))
+    p = Polisher({"provider": "openai", "api_base": "http://localhost:1234/v1"}, session=s,
+                 get_key=lambda slot: asked.append(slot) or SECRET)
+    assert p.rewrite("hi", "x") == "Hi."
+    assert "Authorization" not in s.calls[-1][2]                     # local server: no key
+    assert s.calls[-1][1].startswith("http://127.0.0.1:1234/")       # IPv4, no ::1 delay
+
+
+def test_scheme_check_is_case_insensitive():
+    p, s = make("openai", api_base="HTTP://example.com/v1")
+    assert p.rewrite("hi", "x") is None and s.calls == []
+
+
+def test_unexpected_answer_shapes_never_raise():
+    shapes = [Resp(200, {"choices": [{"message": {"content": [{"type": "text", "text": "A."}]}}]}),
+              Resp(200, {"choices": [None]}), Resp(200, {"choices": []})]
+    p, _ = make("openai", *shapes)
+    assert p.rewrite("aa", "x") == "A."
+    assert p.rewrite("aa", "x") is None and p.rewrite("aa", "x") is None
+    p, _ = make("anthropic", Resp(200, {"content": None}))
+    assert p.rewrite("aa", "x") is None
+    p, _ = make("ollama", Resp(200, {"message": "oops"}))
+    assert p.rewrite("aa", "x") is None
+
+
+def test_write_mode_gets_a_real_token_budget():
+    p, s = make("openai", Resp(200, {"choices": [{"message": {"content": "Long text."}}]}))
+    p.rewrite("write a cover letter", "", mode="command")
+    assert s.calls[-1][3]["max_tokens"] >= 2048
+
+
+def test_separate_models_per_provider():
+    p, _ = make("anthropic", api_model="gpt-4o", anthropic_model="")
+    assert p.model == "claude-haiku-5-5"

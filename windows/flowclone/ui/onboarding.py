@@ -160,7 +160,13 @@ class Onboarding(QWidget):
 
         app.bridge.model_status.connect(self._model_status)
         self._model_status(*app.model_status)
+        app.theme.changed.connect(self._theme_changed)
         self._go(0)
+
+    def _theme_changed(self):
+        from .widgets import restyle_tree
+        restyle_tree(self, self.app.theme)
+        apply_titlebar(self, self.app.theme.dark, self.app.theme.tokens["bg"])
 
     def _page(self, title, subtitle):
         w = QWidget()
@@ -232,9 +238,14 @@ class Onboarding(QWidget):
             def cb(indata, frames, t, status):
                 block = indata[:, 0]
                 self._level.changed.emit(float(np.sqrt(np.mean(block * block))) if block.size else 0.0)
-            self._stream = sd.InputStream(samplerate=16000, channels=1, dtype="float32",
-                                          device=self.mic.currentData(), callback=cb)
-            self._stream.start()
+            stream = sd.InputStream(samplerate=16000, channels=1, dtype="float32",
+                                    device=self.mic.currentData(), callback=cb)
+            try:
+                stream.start()
+            except Exception:
+                stream.close()
+                raise
+            self._stream = stream
             self.mic_hint.setText("")
         except Exception as e:
             self._stream = None

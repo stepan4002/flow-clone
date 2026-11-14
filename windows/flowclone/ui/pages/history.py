@@ -160,12 +160,14 @@ class HistoryPage:
         self._reload()
 
     def _reload(self):
+        keep = (self._selected() or {}).get("id")
         rows = self.app.history.search(self.search.text(), self.app_filter.currentData(), limit=1000)
         self.model.set_rows(rows)
         searching = bool(self.search.text().strip()) or self.app_filter.currentData()
         if rows:
             self.stack.setCurrentWidget(self.table)
-            self.table.selectRow(0)
+            ids = [r["id"] for r in rows]
+            self.table.selectRow(ids.index(keep) if keep in ids else 0)
         else:
             self.empty.set_text("No matches" if searching else "Nothing here yet",
                                 "Try other words or another app." if searching
@@ -213,8 +215,12 @@ class HistoryPage:
 
     def _delete(self):
         e = self._selected()
-        if e and self.app.history.delete(e["id"]):
+        if not e:
+            return
+        if self.app.history.delete(e["id"]):
             self._reload()
+        else:
+            self.app.flash("Couldn't delete — the history file is in use", 2500)
 
     def _clear(self):
         box = QMessageBox(QMessageBox.Warning, "Clear history",
@@ -222,7 +228,8 @@ class HistoryPage:
                           QMessageBox.Yes | QMessageBox.Cancel, self.widget)
         box.setDefaultButton(QMessageBox.Cancel)
         if box.exec() == QMessageBox.Yes:
-            self.app.history.clear()
+            if not self.app.history.clear():
+                self.app.flash("Couldn't clear — the history file is in use", 2500)
             self.refresh()
 
     def restyle(self):

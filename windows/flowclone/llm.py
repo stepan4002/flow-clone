@@ -47,18 +47,53 @@ class LLMError(Exception):
 
 
 def _is_local(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
+    host = (urlparse(url.strip()).hostname or "").lower()
     return host in ("localhost", "127.0.0.1", "::1")
+
+
+def _ipv4_localhost(url: str) -> str:
+    """'localhost' resolves to ::1 first on Windows, and a server that only listens on
+    127.0.0.1 (Ollama's default) then costs ~2 s per connection. Use the IPv4 address."""
+    p = urlparse(url)
+    if (p.hostname or "").lower() == "localhost":
+        netloc = p.netloc.lower().replace("localhost", "127.0.0.1", 1)
+        return p._replace(netloc=netloc).geturl()
+    return url
+
+
+def openai_base(cfg: dict) -> str:
+    return (cfg.get("api_base") or "").strip().rstrip("/") or OPENAI_BASE
+
+
+def key_slot(provider: str, cfg: dict) -> str:
+    """Where the API key is stored. OpenAI-compatible services each get their own slot, so a
+    key saved for one address is never sent to another."""
+    if provider != "openai":
+        return provider
+    host = (urlparse(openai_base(cfg)).hostname or "").lower()
+    return "openai" if host in ("", "api.openai.com") else f"openai@{host}"
+
+
+def is_cloud(cfg: dict) -> bool:
+    """Does the configured provider send text off this computer?"""
+    provider = cfg.get("provider", "ollama")
+    if provider == "anthropic":
+        return True
+    if provider == "openai":
+        return not _is_local(openai_base(cfg))
+    return not _is_local(cfg.get("url") or "http://localhost:11434")
 
 
 class Polisher:
     def __init__(self, cfg: dict, session=None, get_key=None):
         provider = cfg.get("provider", "ollama")
         self.provider = provider if provider in PROVIDERS else "ollama"
-        self.url = (cfg.get("url") or "http://localhost:11434").rstrip("/")
-        self.api_base = (cfg.get("api_base") or "").rstrip("/")
-        model = cfg.get("model") if self.provider == "ollama" else cfg.get("api_model")
-        self.model = model or DEFAULT_MODELS[self.provider]
+        self.url = _ipv4_localhost((cfg.get("url") or "http://localhost:11434").strip().rstrip("/"))
+        self.api_base = _ipv4_localhost(openai_base(cfg))
+        self.slot = key_slot(self.provider, cfg)
+        model = {"ollama": cfg.get("model"), "openai": cfg.get("api_model"),
+                 "anthropic": cfg.get("anthropic_model")}[self.provider]
+        self.model = (model or "").strip() or DEFAULT_MODELS[self.provider]
         self.timeout = float(cfg.get("timeout_seconds", 12))
         self.tone_matching = cfg.get("tone_matching", True)
         self._session = session
@@ -81,9 +116,16 @@ class Polisher:
                     log.info("Ollama not reachable at %s — using rules only", self.url)
                 self._probe = (time.monotonic(), ok)
             return ok
-        if self.provider == "openai" and self.api_base and _is_local(self.api_base):
+        if self.provider == "openai" and _is_local(self.api_base):
             return True
         return bool(self._key())
+
+    def close(self):
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception:
+                pass
 
     def rewrite(self, text: str, instruction: str, selection: str | None = None,
                 mode: str = "polish") -> str | None:
@@ -102,11 +144,20 @@ class Polisher:
             system = _POLISH_SYSTEM.format(instruction=instruction)
             user = f"<transcript>\n{text}\n</transcript>"
             basis = text
+        # Writing from scratch (Command Mode, nothing selected) may be long; else size by input.
+        budget = 2048 if mode == "command" and not basis else self._max_tokens(basis or text)
         t0 = time.monotonic()
         try:
-            out = self._call(system, user, basis or text)
+            out = self._call(system, user, budget)
         except LLMError as e:
             log.warning("AI rewrite skipped (%s, %s): %s", self.provider, self.model, e)
+            return None
+        except Exception as e:  # an answer of an unexpected shape: never lose the dictation
+            log.warning("AI rewrite skipped (%s, %s): unexpected answer (%s)", self.provider,
+                        self.model, type(e).__name__)
+            return None
+        if not isinstance(out, str):
+            log.warning("AI rewrite skipped (%s): unexpected answer", self.provider)
             return None
         out = _WRAP_RE.sub("", _THINK_RE.sub("", out or "")).strip()
         if not out:
@@ -136,10 +187,14 @@ class Polisher:
                 return False, f"Ollama is not running at {self.url}"
             return False, "No API key saved for this provider"
         try:
-            out = self._call("Reply with exactly: OK", "ping", "ping")
+            out = self._call("Reply with exactly: OK", "ping", 64)
         except LLMError as e:
             return False, str(e)
-        return (True, f"Connected — {self.model}") if out.strip() else (False, "Empty answer")
+        except Exception as e:
+            return False, f"Unexpected answer ({type(e).__name__})"
+        if not isinstance(out, str) or not out.strip():
+            return False, "Empty answer"
+        return True, f"Connected — {self.model}"
 
     # ---------- providers ----------
 
@@ -154,7 +209,7 @@ class Polisher:
         if get is None:
             from .credstore import get_key as get
         try:
-            return get(self.provider)
+            return get(self.slot)
         except Exception:
             return None
 
@@ -177,11 +232,14 @@ class Polisher:
         if not r.ok:
             raise LLMError(f"HTTP {r.status_code}")
         try:
-            return r.json()
+            data = r.json()
         except ValueError:
             raise LLMError("invalid answer") from None
+        if not isinstance(data, dict):
+            raise LLMError("invalid answer")
+        return data
 
-    def _call(self, system: str, user: str, basis: str) -> str:
+    def _call(self, system: str, user: str, max_tokens: int) -> str:
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         if self.provider == "ollama":
             body = {"model": self.model, "messages": messages, "stream": False, "think": False,
@@ -193,32 +251,47 @@ class Polisher:
                     raise
                 body.pop("think")  # older Ollama / a model without a thinking switch
                 data = self._post(f"{self.url}/api/chat", {}, body)
-            return (data.get("message") or {}).get("content", "") or ""
+            return _text((data.get("message") or {}).get("content"))
         if self.provider == "openai":
-            base = self.api_base or OPENAI_BASE
-            if base.startswith("http://") and not _is_local(base):
-                raise LLMError("an http:// address is only allowed for a server on this computer")
+            base = self.api_base
+            scheme = (urlparse(base).scheme or "").lower()
+            local = _is_local(base)
+            if scheme not in ("http", "https") or (scheme == "http" and not local):
+                raise LLMError("the API address must start with https:// "
+                               "(http:// only for a server on this computer)")
             headers = {}
-            key = self._key()
+            key = None if local else self._key()  # a local server never gets a cloud key
             if key:
                 headers["Authorization"] = f"Bearer {key}"
             body = {"model": self.model, "messages": messages, "temperature": 0.2,
-                    "max_tokens": self._max_tokens(basis)}
+                    "max_tokens": max_tokens}
             data = self._post(f"{base}/chat/completions", headers, body)
-            choice = (data.get("choices") or [{}])[0]
+            choices = data.get("choices") or [{}]
+            choice = choices[0] if isinstance(choices[0], dict) else {}
             if choice.get("finish_reason") == "length":
                 raise LLMError("the answer was cut off")
-            return (choice.get("message") or {}).get("content") or ""
+            return _text((choice.get("message") or {}).get("content"))
         key = self._key()  # anthropic
         if not key:
             raise LLMError("no API key saved")
         headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
-        body = {"model": self.model, "max_tokens": self._max_tokens(basis), "system": system,
+        body = {"model": self.model, "max_tokens": max_tokens, "system": system,
                 "messages": [{"role": "user", "content": user}], "temperature": 0.2}
         data = self._post(ANTHROPIC_URL, headers, body)
         if data.get("stop_reason") == "max_tokens":
             raise LLMError("the answer was cut off")
-        return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        return _text(data.get("content"))
+
+
+def _text(content) -> str:
+    """Answer text from a string or a list of content parts ({type: text, text: ...})."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(p.get("text", "") for p in content
+                       if isinstance(p, dict) and p.get("type", "text") == "text"
+                       and isinstance(p.get("text", ""), str))
+    return ""
 
 
 OllamaPolisher = Polisher  # name used before 1.3.0

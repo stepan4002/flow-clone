@@ -31,6 +31,23 @@ def _defaults() -> dict:
             "seconds_dictated": 0.0, "apps": {}, "best_streak": 0}
 
 
+def _valid(loaded: dict) -> dict:
+    """Keep only values of the expected type (a hand-edited stats.json must not break every
+    dictation)."""
+    out = {}
+    for key, default in _defaults().items():
+        v = loaded.get(key, default)
+        if isinstance(default, dict):
+            ok = isinstance(v, dict) and all(isinstance(k, str) and isinstance(n, (int, float))
+                                             for k, n in v.items())
+        elif isinstance(default, float):
+            ok = isinstance(v, (int, float)) and not isinstance(v, bool)
+        else:
+            ok = isinstance(v, int) and not isinstance(v, bool)
+        out[key] = v if ok else default
+    return out
+
+
 class Stats:
     def __init__(self, path: Path | None = None, today=date.today):
         self._lock = threading.Lock()
@@ -41,7 +58,7 @@ class Stats:
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
-                    self.data.update(loaded)
+                    self.data.update(_valid(loaded))
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -64,7 +81,8 @@ class Stats:
             d["days"] = {k: v for k, v in d["days"].items() if k >= cutoff}
             d["best_streak"] = max(d["best_streak"], self._streak_unlocked())
             try:
-                self.path.write_text(json.dumps(d), encoding="utf-8")
+                from .config import atomic_write
+                atomic_write(self.path, json.dumps(d))
             except OSError:
                 pass
 

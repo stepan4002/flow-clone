@@ -35,3 +35,19 @@ def test_existing_key_types_unchanged():
     assert isinstance(d["llm"]["enabled"], bool) and isinstance(d["llm"]["url"], str)
     assert isinstance(d["hotkeys"]["push_to_talk"], list)
     assert isinstance(d["casual_apps"], list) and isinstance(d["overlay"], dict)
+
+
+def test_bad_sections_do_not_stop_startup(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"overlay": None, "llm": "off", "ui": "dark", "sounds": False}), encoding="utf-8")
+    c = config.load_config()
+    assert c["overlay"]["enabled"] is True and c["llm"]["provider"] == "ollama"
+    assert c["ui"]["onboarding_done"] is True and c["sounds"] is False
+
+
+def test_save_config_is_atomic(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    config.save_config({"a": 1})
+    assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8")) == {"a": 1}
+    assert not list(tmp_path.glob("*.tmp"))

@@ -152,7 +152,9 @@ class FlowApp:
         self._last_tap = 0.0
         self._target_app = ""
         self._target_hwnd = 0
-        self._last_target_hwnd = 0
+        self._app_windows: dict[str, int] = {}   # exe -> last window dictated into (History paste)
+        self._insert_lock = threading.Lock()     # one paste / selection read at a time
+        self._llm_snapshot = dict(self.config["llm"])
         self._hands_free_deadline = 0.0
 
         bridge.show_window.connect(self._show_window)
@@ -254,7 +256,11 @@ class FlowApp:
     def save_settings(self, mutator, live: bool = True):
         with self._settings_lock:
             mutator(self.config)
-            cfg.save_config(self.config)
+            try:
+                cfg.save_config(self.config)
+            except OSError as e:
+                log.error("could not save the settings: %s", e)
+                self.flash("Couldn't save settings — see the log", 3000)
         if live:
             self.apply_live_settings()
 
@@ -265,15 +271,21 @@ class FlowApp:
         self.pill.show_pill = c["overlay"]["enabled"]
         if self.theme.mode != c["ui"].get("theme", "system"):
             self.theme.set_mode(c["ui"].get("theme", "system"))
-        self.rebuild_polisher()
+        if dict(c["llm"]) != self._llm_snapshot:
+            self.rebuild_polisher()
         if self.hotkeys is not None:
             self.hotkeys.set_command_key(c["hotkeys"].get("command_modifier"))
-        if not self.recording and self.recorder.device != c["audio"]["device"]:
-            self.recorder = self._make_recorder()
+        # A new microphone is picked up when the next recording starts (see _start_recording).
         log.info("settings applied")
 
     def rebuild_polisher(self):
+        old = self.polisher
         self.polisher = Polisher(self.config["llm"])
+        self._llm_snapshot = dict(self.config["llm"])
+        try:
+            old.close()
+        except Exception:
+            pass
 
     def suspend_hotkeys(self):
         if self.hotkeys is not None:
@@ -323,7 +335,9 @@ class FlowApp:
             self._engine_ready.set()
             self.tray.set_tooltip("FlowClone — ready")
             self._set_model_status("ready", 100)
-            if self.pill.state in ("loading", "downloading"):
+            # Nothing can be recording yet (the hotkey waits for the model), so this only clears
+            # the loading/download pill, including one that a short message is shown over.
+            if self.pill.state in ("loading", "downloading", "info"):
                 self.pill.set_state("hidden")
             log.info("engine ready: %s", self.engine.name)
         except ModelError as e:
@@ -364,7 +378,8 @@ class FlowApp:
 
     def _on_command(self):
         """The command key was added while holding the hotkey."""
-        if self.recording and not self.hands_free and not self.command and self._command_ready():
+        if (self.recording and not self.hands_free and not self.command
+                and self.config["llm"].get("enabled")):
             self.command = True
             self.pill.set_state("command")
 
@@ -400,7 +415,10 @@ class FlowApp:
         if duration < self.config["min_recording_seconds"]:
             # Too short to be speech: treat as a tap (double-tap = hands-free).
             now = time.time()
-            if not command and self.config["double_tap_hands_free"] and now - self._last_tap < 0.6:
+            if command:
+                self._last_tap = 0.0
+                self.pill.set_state("hidden")
+            elif self.config["double_tap_hands_free"] and now - self._last_tap < 0.6:
                 self._last_tap = 0.0
                 self._start_hands_free()
             else:
@@ -453,6 +471,9 @@ class FlowApp:
     def _start_recording(self, state: str = "recording"):
         self._target_app = get_foreground_app()
         self._target_hwnd = inject.foreground_window()
+        self._target_test = self.test_mode
+        if self.recorder.device != self.config["audio"]["device"]:
+            self.recorder = self._make_recorder()
         try:
             self.recorder.start()
         except Exception as e:
@@ -472,10 +493,21 @@ class FlowApp:
         return self.recorder.stop()
 
     def _process_async(self, audio_data, seconds: float, command: bool):
-        threading.Thread(target=self._process, args=(audio_data, seconds, command),
+        target = (self._target_app, self._target_hwnd, getattr(self, "_target_test", False))
+        threading.Thread(target=self._process, args=(audio_data, seconds, command, target),
                          daemon=True, name="dictation").start()
 
-    def _process(self, audio_data, seconds: float = 0.0, command: bool = False):
+    def _process(self, audio_data, seconds: float = 0.0, command: bool = False, target=None):
+        target = target or (self._target_app, self._target_hwnd, False)
+        try:
+            self._process_inner(audio_data, seconds, command, target)
+        except Exception:
+            log.exception("dictation failed")
+            self.pill.set_state("info", "Something went wrong — see the log", flash_ms=3000)
+            self.sounds.play("error")
+
+    def _process_inner(self, audio_data, seconds, command, target):
+        app_name, hwnd, test = target
         if audio_data.size == 0:
             self.pill.set_state("hidden")
             return
@@ -499,27 +531,27 @@ class FlowApp:
             self.pill.set_state("info", "No speech detected", flash_ms=1500)
             return
 
-        app_name = self._target_app
         if command:
-            self._run_command(raw, app_name, seconds, t0)
+            self._run_command(raw, app_name, hwnd, seconds, t0, test)
             return
         style = styles.style_for(app_name, self.config)
         text = self.lexicon.apply(raw)
         text, press_enter = styles.apply_rules(text, style, self.config["cleanup"])
-        if self.config["llm"]["enabled"] and text:
+        if self.config["llm"]["enabled"] and text and style != "verbatim":
             instruction = styles.llm_instruction(
                 style if self.config["llm"].get("tone_matching", True) else "clean")
             text = self.polisher.rewrite(text, instruction) or text
         if not text:
             self.pill.set_state("hidden")
             return
-        self._insert(text, app_name, press_enter)
-        self._record(text, raw, app_name, seconds, style)
+        self._insert(text, app_name, hwnd, press_enter)
+        self._record(text, raw, app_name, seconds, style, test)
         self.pill.set_state("hidden")
         log.info("dictation -> %s (%.1f s audio, %.1f s total, %d words, %s style)",
                  app_name or "unknown app", seconds, time.time() - t0, count_words(text), style)
 
-    def _run_command(self, spoken: str, app_name: str, seconds: float, t0: float):
+    def _run_command(self, spoken: str, app_name: str, hwnd: int, seconds: float, t0: float,
+                     test: bool = False):
         """Command Mode: apply the spoken instruction to the selected text (or, with nothing
         selected, write what was asked for)."""
         deadline = time.monotonic() + 0.5
@@ -530,43 +562,55 @@ class FlowApp:
             self.sounds.play("error")
             return
         self.pill.set_state("processing", "Working on it…")
-        selection = inject.read_selection()
+        selection = None
+        if inject.can_read_selection(app_name):
+            with self._insert_lock:
+                selection = inject.read_selection(app_name)
         instruction = self.lexicon.apply(spoken)
         out = self.polisher.rewrite(instruction, "", selection=selection, mode="command")
         if out is None:
             self.pill.set_state("info", "AI didn't answer — nothing changed", flash_ms=3000)
             self.sounds.play("error")
             return
-        self._insert(out, app_name, False)
-        self._record(out, spoken, app_name, seconds, "command")
+        self._insert(out, app_name, hwnd, False)
+        # Count only what was spoken in the stats (the AI's output isn't dictation speed).
+        self._record(out, spoken, app_name, seconds, "command", test, stats_text=spoken)
         self.pill.set_state("hidden")
         log.info("command -> %s (%s selection, %.1f s, %d words)", app_name or "unknown app",
                  "with" if selection else "no", time.time() - t0, count_words(out))
 
-    def _insert(self, text, app_name, press_enter):
+    def _insert(self, text, app_name, hwnd, press_enter):
         mode = self.config["injection"]["mode"]
         if app_name in [a.lower() for a in self.config["injection"]["type_mode_apps"]]:
             mode = "type"
-        inject.insert_text(text, mode=mode,
-                           restore_delay_ms=self.config["injection"]["restore_clipboard_delay_ms"],
-                           press_enter=press_enter)
-        self._last_target_hwnd = self._target_hwnd
+        with self._insert_lock:  # two dictations finishing together must not mix clipboards
+            inject.insert_text(
+                text, mode=mode,
+                restore_delay_ms=self.config["injection"]["restore_clipboard_delay_ms"],
+                press_enter=press_enter)
+        if app_name and hwnd:
+            self._app_windows[app_name.lower()] = hwnd
 
-    def _record(self, text, raw, app_name, seconds, style):
-        if self.test_mode:
+    def _record(self, text, raw, app_name, seconds, style, test=False, stats_text=None):
+        if test:
             return
         self.history.append(text, raw, app_name, duration_s=seconds, style=style)
-        self.stats.add(text, seconds=seconds, app=app_name)
+        self.stats.add(text if stats_text is None else stats_text, seconds=seconds, app=app_name)
         self.bridge.dictation_done.emit()
 
     # ---------- history shortcuts ----------
 
     def paste_last(self):
-        last = self.history.last()
-        if last:
-            inject.insert_text(
-                last, mode=self.config["injection"]["mode"],
-                restore_delay_ms=self.config["injection"]["restore_clipboard_delay_ms"])
+        """Hotkey callback (keyboard thread): do the work elsewhere, after Shift/Alt are up."""
+        def work():
+            inject.wait_modifiers_released()
+            last = self.history.last()
+            if last:
+                with self._insert_lock:
+                    inject.insert_text(
+                        last, mode=self.config["injection"]["mode"],
+                        restore_delay_ms=self.config["injection"]["restore_clipboard_delay_ms"])
+        threading.Thread(target=work, daemon=True, name="paste-last").start()
 
     def copy_last(self):
         last = self.history.last()
@@ -574,19 +618,21 @@ class FlowApp:
             inject.copy_to_clipboard(last)
 
     def paste_into_last_app(self, text: str, app_exe: str = ""):
-        """From the History page: put the text into the app of the last dictation."""
-        hwnd = self._last_target_hwnd
+        """From the History page: put the text into the app the entry was dictated into (the
+        window last used in this session, else any open window of that app)."""
+        exe = (app_exe or "").lower()
+        hwnd = self._app_windows.get(exe) or inject.find_app_window(exe)
 
         def work():
             if self.window is not None:
                 self.bridge.call.emit(self.window.showMinimized)
             time.sleep(0.3)
-            if not inject.focus_window(hwnd):
+            if not hwnd or not inject.focus_window(hwnd):
                 inject.copy_to_clipboard(text)
-                self.flash("That window is gone — copied instead", 2500)
+                self.flash("That app isn't open — copied, paste with Ctrl+V", 3000)
                 return
             time.sleep(0.15)
-            self._insert(text, app_exe, False)
+            self._insert(text, exe, hwnd, False)
         threading.Thread(target=work, daemon=True).start()
 
 

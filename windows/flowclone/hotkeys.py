@@ -84,6 +84,9 @@ class HotkeyManager:
                 self._pressed.add(name)
                 if not self._armed and self._pressed >= self.combo:
                     self._armed = True
+                    # Trust Windows' real key state over our flag: a key-up the hook never saw
+                    # (released while an admin window had focus) must not stick Command Mode on.
+                    self._mod_down = self._mod_down and self._really_down(self.command_key)
                     self.on_press(self._mod_down)
         else:  # KEY_UP
             if self.command_key and name == self.command_key:
@@ -98,6 +101,14 @@ class HotkeyManager:
                         keyboard.send("ctrl")
                     self.on_release()
                 self._pressed.discard(name)
+
+    @staticmethod
+    def _really_down(key: str | None) -> bool:
+        vk = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12}.get(key or "")
+        if vk is None:
+            return True  # no reliable check for this key: keep the hook's view
+        from .inject import modifier_down
+        return modifier_down(vk)
 
     def stop(self):
         try:
