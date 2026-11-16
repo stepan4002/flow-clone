@@ -11,9 +11,18 @@
 </p>
 
 <p align="center">
-  <b>Hold a key, speak, release — polished text appears in any app.</b><br>
+  <b>Speak instead of type — in any app, on Windows and Android.</b><br>
   Speech recognition on your device. No account. No subscription. No word limits. Your voice never leaves your computer or phone.
 </p>
+
+FlowClone is a free, open-source alternative to Wispr Flow. On **Windows**, hold **Ctrl + Win**,
+speak and release; on **Android**, the **FlowKey** voice keyboard types as you talk, in 99 languages.
+Both apps clean up what you say (fillers, punctuation, *“scratch that”*), write in the right
+**style for each app** — casual in chat, formal in email, exact in code — and show your
+**insights**: words dictated, day streak, speaking speed and time saved. Select text and say
+*“make this shorter”* or *“translate to German”* to edit it by voice (**Command Mode** on
+Windows, **✨ Edit** on Android). The optional AI rewrite runs on your own Ollama server or with
+your own API key, and is off until you turn it on.
 
 <p align="center">
   <img src="docs/assets/demo.svg" alt="Hold Ctrl+Win, speak, release: the cleaned-up sentence is typed into the focused app" width="720">
@@ -24,7 +33,7 @@
 ## ⚡ Install in one line
 
 **Windows 10/11** — download and run
-**[FlowClone-Setup.exe](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowClone-Setup.exe)**
+**[FlowClone-Setup.exe](https://github.com/stepan4002/flow-clone/releases/download/v1.3.0/FlowClone-Setup.exe)**
 (~48 MB, no admin rights, no Python needed). A one-minute setup shows you around while the
 speech model downloads once (~670 MB). Then hold **Ctrl + Win**, speak, release.
 
@@ -39,7 +48,7 @@ irm https://raw.githubusercontent.com/stepan4002/flow-clone/main/install.ps1 | i
 ```
 
 **Android 8+** — open this link on your phone and install:
-**[FlowKey.apk](https://github.com/stepan4002/flow-clone/releases/latest/download/FlowKey.apk)** (speech models included, ~270 MB)
+**[FlowKey.apk](https://github.com/stepan4002/flow-clone/releases/download/v1.3.0/FlowKey.apk)** (speech models included, ~270 MB; installs over older versions and keeps your data)
 
 <sub>Prefer to read before you run? See <a href="install.ps1"><code>install.ps1</code></a> — it installs per-user into <code>%LOCALAPPDATA%\FlowClone</code>, needs no admin rights, and is easy to <a href="#uninstall">uninstall</a>.</sub>
 
