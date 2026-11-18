@@ -25,6 +25,13 @@ Windows, **✨ Edit** on Android). The optional AI rewrite runs on your own Olla
 your own API key, and is off until you turn it on.
 
 <p align="center">
+  <a href="https://github.com/stepan4002/flow-clone/releases/download/v1.3.0/FlowClone-presentation.mp4">
+    <img src="docs/img/video-poster.png" alt="Watch the 53-second FlowClone tour (video)" width="720">
+  </a><br>
+  <sub>▶ <a href="https://github.com/stepan4002/flow-clone/releases/download/v1.3.0/FlowClone-presentation.mp4">Watch the 53-second tour</a> — made in code with Remotion, see <a href="video/"><code>video/</code></a></sub>
+</p>
+
+<p align="center">
   <img src="docs/assets/demo.svg" alt="Hold Ctrl+Win, speak, release: the cleaned-up sentence is typed into the focused app" width="720">
 </p>
 
@@ -127,6 +134,7 @@ FlowClone recreates the core Wispr Flow workflow with local models. It is an ind
 | [`windows/`](windows/) | Python + Qt desktop app (home, history, dictionary, snippets, styles, settings) and the installer. [Full guide →](windows/README.md) |
 | [`android/`](android/) | Kotlin voice-keyboard IME. [Build & usage guide →](android/README.md) · [models →](android/MODELS.md) |
 | [`docs/research/`](docs/research/) | Feature spec and the local speech-to-text engine comparison |
+| [`video/`](video/) | The presentation video, made in code (Remotion + a synthesized soundtrack) |
 | [`install.ps1`](install.ps1) · [`scripts/`](scripts/) | One-line installers |
 
 ## 🛠️ Build from source
